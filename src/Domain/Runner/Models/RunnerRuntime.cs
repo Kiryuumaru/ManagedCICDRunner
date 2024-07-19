@@ -10,6 +10,10 @@ namespace Domain.Runner.Models;
 
 public class RunnerRuntime
 {
+    public required string Id { get; init; }
+
+    public required string Rev { get; init; }
+
     public required RunnerEntity RunnerEntity { get; init; }
 
     public Dictionary<string, RunnerInstance> Runners { get; set; } = [];

@@ -21,7 +21,6 @@ public class BaseApplication : ApplicationDependency
         services.AddScoped<DockerService>();
 
         services.AddScoped<RunnerService>();
-        services.AddScoped<RunnerApiService>();
         services.AddScoped<RunnerStoreService>();
         services.AddHostedService<RunnerWorker>();
         services.AddSingletonObjectHolder<RunnerRuntime[]>();

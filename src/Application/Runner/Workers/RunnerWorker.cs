@@ -37,7 +37,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), stoppingToken, Routine, ex => _logger.LogError("Container runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(2), stoppingToken, Routine, ex => _logger.LogError("Container runner error: {msg}", ex.Message));
         return Task.CompletedTask;
     }
 
@@ -62,7 +62,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         List<RunnerRuntime> runnerRuntimes = (await runnerService.GetAll(stoppingToken))
             .GetValueOrThrow()
-            .Select(i => new RunnerRuntime() { RunnerEntity = i })
+            .Select(i => new RunnerRuntime()
+            {
+                Id = i.Id,
+                Rev = i.Rev,
+                RunnerEntity = i
+            })
             .ToList();
 
         List<(RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
@@ -106,7 +111,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     Name = RunnerAction.Name,
                     RunnerAction = RunnerAction,
                     DockerContainer = null,
-                    Status = RunnerStatus.Initializing
+                    Status = RunnerStatus.Building
                 };
             }
         }
@@ -124,7 +129,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     if (runnerRuntime.Runners.TryGetValue(container.Name, out var runner))
                     {
-                        RunnerStatus status = RunnerStatus.Initializing;
+                        RunnerStatus status = RunnerStatus.Building;
                         if (runner.RunnerAction != null)
                         {
                             status = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
@@ -144,7 +149,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             Name = containerRunnerName,
                             RunnerAction = null,
                             DockerContainer = container,
-                            Status = RunnerStatus.Initializing
+                            Status = RunnerStatus.Building
                         };
                     }
                     runnerRuntime.Runners[containerRunnerName] = runner;
@@ -185,8 +190,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     else if (runner.DockerContainer != null && runner.RunnerAction != null)
                     {
-                        if (runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
-                            containerRunnerRev != runnerRuntime.RunnerEntity.Rev)
+                        if (!runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
+                            containerRunnerRev != runnerRuntime.Rev)
                         {
                             await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
                             await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
@@ -207,7 +212,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 foreach (var oldRunner in oldRunnerRuntime.Runners.Values)
                 {
-                    if (oldRunner.Status == RunnerStatus.Initializing &&
+                    if (oldRunner.Status == RunnerStatus.Building &&
                         !runnerRuntime.Runners.ContainsKey(oldRunner.Name))
                     {
                         runnerRuntime.Runners[oldRunner.Name] = oldRunner;
@@ -230,7 +235,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 Name = name,
                                 DockerContainer = null,
                                 RunnerAction = null,
-                                Status = RunnerStatus.Initializing
+                                Status = RunnerStatus.Building
                             };
                             string args = $"--name {name} --url {GetConfigUrl(runnerRuntime.RunnerEntity)} --ephemeral --unattended";
                             var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerRuntime.RunnerEntity, "actions/runners/registration-token", stoppingToken);
