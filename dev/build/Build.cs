@@ -41,6 +41,24 @@ class Build : BaseNukeBuildHelpers
         return version;
     }
 
+    AbsolutePath GetOutAsset(IRunContext context, string os, string arch)
+    {
+        string name = $"ManagedCICDRunner_{os.ToLowerInvariant()}_{arch.ToLowerInvariant()}";
+        var fileName = name + "-" + GetVersion(context);
+        if (os == "linux")
+        {
+            return OutputDirectory / (fileName + ".tar.gz");
+        }
+        else if (os == "windows")
+        {
+            return OutputDirectory / (fileName + ".zip");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+    }
+
     BuildEntry BuildEdgeGridBinaries => _ => _
         .AppId("managed-cicd-runner")
         .Matrix(osMatrix, (definitionOs, os) =>
@@ -52,41 +70,18 @@ class Build : BaseNukeBuildHelpers
                 "windows" => RunnerOS.Windows2022,
                 _ => throw new NotSupportedException()
             });
-            definitionOs.Matrix(archMatrix, (definitionArch, buildArch) =>
+            definitionOs.Matrix(archMatrix, (definitionArch, arch) =>
             {
-                string runtime = $"{os.ToLowerInvariant()}-{buildArch.ToLowerInvariant()}";
-                string name = $"ManagedCICDRunner_{os.ToLowerInvariant()}_{buildArch.ToLowerInvariant()}";
-                definitionArch.WorkflowId($"build_{os}_{buildArch}");
-                definitionArch.DisplayName($"[Build] {osPascal}{buildArch.ToUpperInvariant()}");
-                definitionArch.ReleaseAsset(context =>
-                {
-                    var fileName = name + "-" + GetVersion(context);
-                    if (os == "linux")
-                    {
-                        return [OutputDirectory / (fileName + ".tar.gz")];
-                    }
-                    else if (os == "windows")
-                    {
-                        return [OutputDirectory / (fileName + ".zip")];
-                    }
-                    else
-                    {
-                        throw new NotSupportedException();
-                    }
-                });
+                string runtime = $"{os.ToLowerInvariant()}-{arch.ToLowerInvariant()}";
+                definitionArch.WorkflowId($"build_{os}_{arch}");
+                definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
+                definitionArch.ReleaseAsset(context => [GetOutAsset(context, os, arch)]);
                 definitionArch.Execute(context =>
                 {
-                    var fileName = name + "-" + GetVersion(context);
-                    var dirOut = OutputDirectory / fileName / fileName;
+                    var outAsset = GetOutAsset(context, os, arch);
+                    var archivePath = outAsset.Parent / outAsset.NameWithoutExtension;
+                    var outPath = archivePath / outAsset.NameWithoutExtension;
                     var proj = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
-                    string buildRuntime = runtime switch
-                    {
-                        "linux-x64" => "linux-x64",
-                        "windows-x64" => "win-x64",
-                        "linux-arm64" => "linux-arm64",
-                        "windows-arm64" => "win-arm64",
-                        _ => throw new NotImplementedException()
-                    };
                     DotNetTasks.DotNetBuild(_ => _
                         .SetProjectFile(proj)
                         .SetConfiguration("Release"));
@@ -94,19 +89,23 @@ class Build : BaseNukeBuildHelpers
                         .SetProject(proj)
                         .SetConfiguration("Release")
                         .EnableSelfContained()
-                        .SetRuntime(buildRuntime)
+                        .SetRuntime(runtime switch
+                        {
+                            "linux-x64" => "linux-x64",
+                            "windows-x64" => "win-x64",
+                            "linux-arm64" => "linux-arm64",
+                            "windows-arm64" => "win-arm64",
+                            _ => throw new NotImplementedException()
+                        })
                         .EnablePublishSingleFile()
-                        .SetOutput(dirOut));
-                    AbsolutePath archivePath;
+                        .SetOutput(outPath));
                     if (os == "linux")
                     {
-                        archivePath = OutputDirectory / (fileName + ".tar.gz");
-                        (OutputDirectory / fileName).TarGZipTo(archivePath);
+                        archivePath.TarGZipTo(outAsset);
                     }
                     else if (os == "windows")
                     {
-                        archivePath = OutputDirectory / (fileName + ".zip");
-                        (OutputDirectory / fileName).ZipTo(archivePath);
+                        archivePath.ZipTo(outAsset);
                     }
                     else
                     {
