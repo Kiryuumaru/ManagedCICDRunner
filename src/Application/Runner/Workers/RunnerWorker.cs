@@ -190,7 +190,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     else if (runner.DockerContainer != null && runner.RunnerAction != null)
                     {
-                        if (runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
+                        if (!runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
                             containerRunnerRev != runnerRuntime.Rev)
                         {
                             await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
