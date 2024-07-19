@@ -11,6 +11,7 @@ namespace Presentation.Controllers;
 /// Controller for managing Runner entities.
 /// </summary>
 [ApiController]
+[Route("api/[controller]")]
 public class RunnerController(RunnerService runnerService) : ControllerBase
 {
     private readonly RunnerService _runnerService = runnerService;
