@@ -1,0 +1,6 @@
+FROM mcr.microsoft.com/windows:20H2
+SHELL ["powershell"]
+
+RUN Set-ExecutionPolicy Unrestricted
+RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\vs_community.exe" -UseBasicParsing
+RUN & "$env:TEMP\vs_community.exe" --add Microsoft.VisualStudio.Workload.VCTools --quiet --wait --norestart --noUpdateInstaller | Out-Default
