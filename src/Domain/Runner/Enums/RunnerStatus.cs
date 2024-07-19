@@ -10,5 +10,5 @@ namespace Domain.Runner.Enums;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum RunnerStatus
 {
-    Initializing, Ready, Busy
+    Building, Starting, Ready, Busy
 }
