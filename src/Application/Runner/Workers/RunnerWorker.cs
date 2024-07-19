@@ -62,7 +62,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         List<RunnerRuntime> runnerRuntimes = (await runnerService.GetAll(stoppingToken))
             .GetValueOrThrow()
-            .Select(i => new RunnerRuntime() { RunnerEntity = i })
+            .Select(i => new RunnerRuntime()
+            {
+                Id = i.Id,
+                Rev = i.Rev,
+                RunnerEntity = i
+            })
             .ToList();
 
         List<(RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
@@ -186,7 +191,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     else if (runner.DockerContainer != null && runner.RunnerAction != null)
                     {
                         if (runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
-                            containerRunnerRev != runnerRuntime.RunnerEntity.Rev)
+                            containerRunnerRev != runnerRuntime.Rev)
                         {
                             await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
                             await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);

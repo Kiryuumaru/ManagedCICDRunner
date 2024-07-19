@@ -3,6 +3,7 @@ using Application.LocalStore.Services;
 using Application.Runner.Interfaces;
 using Domain.Runner.Dtos;
 using Domain.Runner.Entities;
+using Domain.Runner.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
@@ -19,9 +20,10 @@ using TransactionHelpers.Interface;
 
 namespace Application.Runner.Services;
 
-public class RunnerService(ILogger<RunnerService> logger, RunnerStoreService runnerStoreService) : IRunnerService
+public class RunnerService(ILogger<RunnerService> logger, IServiceProvider serviceProvider, RunnerStoreService runnerStoreService) : IRunnerService
 {
     private readonly ILogger<RunnerService> _logger = logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly RunnerStoreService _runnerStoreService = runnerStoreService;
 
     public async Task<HttpResult<RunnerEntity[]>> GetAll(CancellationToken cancellationToken = default)
@@ -288,6 +290,42 @@ public class RunnerService(ILogger<RunnerService> logger, RunnerStoreService run
 
             _logger.LogInformation("Runner id {} was deleted", id);
         }
+
+        return result;
+    }
+
+    public async Task<HttpResult<RunnerRuntime[]>> GetAllRuntime(CancellationToken cancellationToken = default)
+    {
+        HttpResult<RunnerRuntime[]> result = new();
+
+        using var scope = _serviceProvider.CreateScope();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<RunnerRuntime[]>();
+        var runnerRuntimes = await runnerRuntimeHolder.Get();
+
+        if (runnerRuntimes != null)
+        {
+            result.WithValue(runnerRuntimes);
+        }
+
+        result.WithStatusCode(HttpStatusCode.OK);
+
+        return result;
+    }
+
+    public async Task<HttpResult<RunnerRuntime>> GetRuntime(string id, CancellationToken cancellationToken = default)
+    {
+        HttpResult<RunnerRuntime> result = new();
+
+        using var scope = _serviceProvider.CreateScope();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<RunnerRuntime[]>();
+        var runnerRuntimes = await runnerRuntimeHolder.Get();
+
+        if (runnerRuntimes != null)
+        {
+            result.WithValue(runnerRuntimes.FirstOrDefault(i => i.Id.Equals(id, StringComparison.InvariantCultureIgnoreCase)));
+        }
+
+        result.WithStatusCode(HttpStatusCode.OK);
 
         return result;
     }

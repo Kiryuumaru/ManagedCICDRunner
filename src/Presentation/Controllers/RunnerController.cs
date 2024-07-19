@@ -1,6 +1,7 @@
 ﻿using Application.Runner.Services;
 using Domain.Runner.Dtos;
 using Domain.Runner.Entities;
+using Domain.Runner.Models;
 using Microsoft.AspNetCore.Mvc;
 using RestfulHelpers.Common;
 
@@ -9,38 +10,10 @@ namespace Presentation.Controllers;
 /// <summary>
 /// Controller for managing Runner entities.
 /// </summary>
-[Route("api/[controller]")]
 [ApiController]
-public class RunnerController(RunnerApiService runnerApiService) : ControllerBase
+public class RunnerController(RunnerService runnerService) : ControllerBase
 {
-    private readonly RunnerApiService _runnerApiService = runnerApiService;
-
-    /// <summary>
-    /// Retrieves all Runner entities.
-    /// </summary>
-    /// <returns>An HTTP result containing an array of RunnerTokenEntity.</returns>
-    /// <response code="200">Returns when the operation is successful.</response>
-    /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet]
-    public Task<HttpResult<RunnerEntity[]>> GetAll()
-    {
-        return _runnerApiService.GetAll();
-    }
-
-    /// <summary>
-    /// Retrieves a specific Runner entity by its ID.
-    /// </summary>
-    /// <param name="id">The ID of the Runner entity to retrieve.</param>
-    /// <returns>An HTTP result containing the RunnerTokenEntity.</returns>
-    /// <response code="200">Returns when the operation is successful.</response>
-    /// <response code="400">Returns when the provided ID is invalid.</response>
-    /// <response code="404">Returns when the provided ID is not found.</response>
-    /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet("{id}")]
-    public Task<HttpResult<RunnerEntity>> Get(string id)
-    {
-        return _runnerApiService.Get(id);
-    }
+    private readonly RunnerService _runnerService = runnerService;
 
     /// <summary>
     /// Creates a new Runner entity.
@@ -53,7 +26,7 @@ public class RunnerController(RunnerApiService runnerApiService) : ControllerBas
     [HttpPost]
     public Task<HttpResult<RunnerEntity>> Create([FromBody] RunnerAddDto runner)
     {
-        return _runnerApiService.Create(runner);
+        return _runnerService.Create(runner);
     }
 
     /// <summary>
@@ -69,7 +42,7 @@ public class RunnerController(RunnerApiService runnerApiService) : ControllerBas
     [HttpPut("{id}")]
     public Task<HttpResult<RunnerEntity>> Edit(string id, [FromBody] RunnerEditDto runner)
     {
-        return _runnerApiService.Edit(id, runner);
+        return _runnerService.Edit(id, runner);
     }
 
     /// <summary>
@@ -84,6 +57,33 @@ public class RunnerController(RunnerApiService runnerApiService) : ControllerBas
     [HttpDelete("{id}")]
     public Task<HttpResult<RunnerEntity>> Delete(string id)
     {
-        return _runnerApiService.Delete(id, false);
+        return _runnerService.Delete(id, false);
+    }
+
+    /// <summary>
+    /// Retrieves all Runner entities.
+    /// </summary>
+    /// <returns>An HTTP result containing an array of RunnerTokenEntity.</returns>
+    /// <response code="200">Returns when the operation is successful.</response>
+    /// <response code="500">Returns when an unexpected error occurs.</response>
+    [HttpGet]
+    public Task<HttpResult<RunnerRuntime[]>> GetAll()
+    {
+        return _runnerService.GetAllRuntime();
+    }
+
+    /// <summary>
+    /// Retrieves a specific Runner entity by its ID.
+    /// </summary>
+    /// <param name="id">The ID of the Runner entity to retrieve.</param>
+    /// <returns>An HTTP result containing the RunnerTokenEntity.</returns>
+    /// <response code="200">Returns when the operation is successful.</response>
+    /// <response code="400">Returns when the provided ID is invalid.</response>
+    /// <response code="404">Returns when the provided ID is not found.</response>
+    /// <response code="500">Returns when an unexpected error occurs.</response>
+    [HttpGet("{id}")]
+    public Task<HttpResult<RunnerRuntime>> Get(string id)
+    {
+        return _runnerService.GetRuntime(id);
     }
 }

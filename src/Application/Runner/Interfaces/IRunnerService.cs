@@ -2,6 +2,7 @@
 using Application.LocalStore.Services;
 using Domain.Runner.Dtos;
 using Domain.Runner.Entities;
+using Domain.Runner.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RestfulHelpers.Common;
@@ -29,4 +30,8 @@ public interface IRunnerService
     Task<HttpResult<RunnerEntity>> Edit(string id, RunnerEditDto runnerEditDto, CancellationToken cancellationToken = default);
 
     Task<HttpResult<RunnerEntity>> Delete(string id, bool hardDelete, CancellationToken cancellationToken = default);
+
+    Task<HttpResult<RunnerRuntime[]>> GetAllRuntime(CancellationToken cancellationToken = default);
+
+    Task<HttpResult<RunnerRuntime>> GetRuntime(string id, CancellationToken cancellationToken = default);
 }
