@@ -11,7 +11,6 @@ namespace Presentation.Controllers;
 /// Controller for managing Runner entities.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
 public class RunnerController(RunnerService runnerService) : ControllerBase
 {
     private readonly RunnerService _runnerService = runnerService;
@@ -24,7 +23,7 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="400">Returns when the provided data is invalid.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpPost]
+    [HttpPost("api/runner")]
     public Task<HttpResult<RunnerEntity>> Create([FromBody] RunnerAddDto runner)
     {
         return _runnerService.Create(runner);
@@ -40,7 +39,7 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <response code="400">Returns when the provided ID or data is invalid.</response>
     /// <response code="404">Returns when the Runner entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpPut("{id}")]
+    [HttpPut("api/runner/{id}")]
     public Task<HttpResult<RunnerEntity>> Edit(string id, [FromBody] RunnerEditDto runner)
     {
         return _runnerService.Edit(id, runner);
@@ -55,7 +54,7 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <response code="400">Returns when the provided ID is invalid.</response>
     /// <response code="404">Returns when the Runner entity with the given ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpDelete("{id}")]
+    [HttpDelete("api/runner/{id}")]
     public Task<HttpResult<RunnerEntity>> Delete(string id)
     {
         return _runnerService.Delete(id, false);
@@ -67,8 +66,35 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <returns>An HTTP result containing an array of RunnerTokenEntity.</returns>
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet]
-    public Task<HttpResult<RunnerRuntime[]>> GetAll()
+    [HttpGet("api/runner")]
+    public Task<HttpResult<RunnerEntity[]>> GetAll()
+    {
+        return _runnerService.GetAll();
+    }
+
+    /// <summary>
+    /// Retrieves a specific Runner entity by its ID.
+    /// </summary>
+    /// <param name="id">The ID of the Runner entity to retrieve.</param>
+    /// <returns>An HTTP result containing the RunnerTokenEntity.</returns>
+    /// <response code="200">Returns when the operation is successful.</response>
+    /// <response code="400">Returns when the provided ID is invalid.</response>
+    /// <response code="404">Returns when the provided ID is not found.</response>
+    /// <response code="500">Returns when an unexpected error occurs.</response>
+    [HttpGet("api/runner/{id}")]
+    public Task<HttpResult<RunnerEntity>> Get(string id)
+    {
+        return _runnerService.Get(id);
+    }
+
+    /// <summary>
+    /// Retrieves all Runner entities.
+    /// </summary>
+    /// <returns>An HTTP result containing an array of RunnerTokenEntity.</returns>
+    /// <response code="200">Returns when the operation is successful.</response>
+    /// <response code="500">Returns when an unexpected error occurs.</response>
+    [HttpGet("api/runner-runtime")]
+    public Task<HttpResult<RunnerRuntime[]>> GetAllRuntime()
     {
         return _runnerService.GetAllRuntime();
     }
@@ -82,8 +108,8 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <response code="400">Returns when the provided ID is invalid.</response>
     /// <response code="404">Returns when the provided ID is not found.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet("{id}")]
-    public Task<HttpResult<RunnerRuntime>> Get(string id)
+    [HttpGet("api/runner-runtime/{id}")]
+    public Task<HttpResult<RunnerRuntime>> GetRuntime(string id)
     {
         return _runnerService.GetRuntime(id);
     }
