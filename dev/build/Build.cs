@@ -73,21 +73,14 @@ class Build : BaseNukeBuildHelpers
             definitionOs.Matrix(archMatrix, (definitionArch, arch) =>
             {
                 string runtime = $"{os.ToLowerInvariant()}-{arch.ToLowerInvariant()}";
-                string buildRuntime = runtime switch
-                {
-                    "linux-x64" => "linux-x64",
-                    "windows-x64" => "win-x64",
-                    "linux-arm64" => "linux-arm64",
-                    "windows-arm64" => "win-arm64",
-                    _ => throw new NotImplementedException()
-                };
                 definitionArch.WorkflowId($"build_{os}_{arch}");
                 definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
                 definitionArch.ReleaseAsset(context => [GetOutAsset(context, os, arch)]);
                 definitionArch.Execute(context =>
                 {
                     var outAsset = GetOutAsset(context, os, arch);
-                    var outPath = outAsset.Parent / outAsset.NameWithoutExtension / outAsset.NameWithoutExtension;
+                    var archivePAth = outAsset.Parent / outAsset.NameWithoutExtension;
+                    var outPath = archivePAth / outAsset.NameWithoutExtension;
                     var proj = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
                     DotNetTasks.DotNetBuild(_ => _
                         .SetProjectFile(proj)
@@ -96,16 +89,23 @@ class Build : BaseNukeBuildHelpers
                         .SetProject(proj)
                         .SetConfiguration("Release")
                         .EnableSelfContained()
-                        .SetRuntime(buildRuntime)
+                        .SetRuntime(runtime switch
+                        {
+                            "linux-x64" => "linux-x64",
+                            "windows-x64" => "win-x64",
+                            "linux-arm64" => "linux-arm64",
+                            "windows-arm64" => "win-arm64",
+                            _ => throw new NotImplementedException()
+                        })
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
                     if (os == "linux")
                     {
-                        outPath.TarGZipTo(outAsset);
+                        archivePAth.TarGZipTo(outAsset);
                     }
                     else if (os == "windows")
                     {
-                        outPath.ZipTo(outAsset);
+                        archivePAth.ZipTo(outAsset);
                     }
                     else
                     {
