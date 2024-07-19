@@ -41,17 +41,16 @@ class Build : BaseNukeBuildHelpers
         return version;
     }
 
-    AbsolutePath GetOutAsset(IRunContext context, string os, string arch)
+    AbsolutePath GetOutAsset(string os, string arch)
     {
         string name = $"ManagedCICDRunner_{os.ToLowerInvariant()}_{arch.ToLowerInvariant()}";
-        var fileName = name + "-" + GetVersion(context);
         if (os == "linux")
         {
-            return OutputDirectory / (fileName + ".tar.gz");
+            return OutputDirectory / (name + ".tar.gz");
         }
         else if (os == "windows")
         {
-            return OutputDirectory / (fileName + ".zip");
+            return OutputDirectory / (name + ".zip");
         }
         else
         {
@@ -75,10 +74,10 @@ class Build : BaseNukeBuildHelpers
                 string runtime = $"{os.ToLowerInvariant()}-{arch.ToLowerInvariant()}";
                 definitionArch.WorkflowId($"build_{os}_{arch}");
                 definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
-                definitionArch.ReleaseAsset(context => [GetOutAsset(context, os, arch)]);
+                definitionArch.ReleaseAsset(context => [GetOutAsset(os, arch)]);
                 definitionArch.Execute(context =>
                 {
-                    var outAsset = GetOutAsset(context, os, arch);
+                    var outAsset = GetOutAsset(os, arch);
                     var archivePath = outAsset.Parent / outAsset.NameWithoutExtension;
                     var outPath = archivePath / outAsset.NameWithoutExtension;
                     var proj = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
@@ -92,8 +91,8 @@ class Build : BaseNukeBuildHelpers
                         .SetRuntime(runtime switch
                         {
                             "linux-x64" => "linux-x64",
-                            "windows-x64" => "win-x64",
                             "linux-arm64" => "linux-arm64",
+                            "windows-x64" => "win-x64",
                             "windows-arm64" => "win-arm64",
                             _ => throw new NotImplementedException()
                         })
