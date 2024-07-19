@@ -79,8 +79,8 @@ class Build : BaseNukeBuildHelpers
                 definitionArch.Execute(context =>
                 {
                     var outAsset = GetOutAsset(context, os, arch);
-                    var archivePAth = outAsset.Parent / outAsset.NameWithoutExtension;
-                    var outPath = archivePAth / outAsset.NameWithoutExtension;
+                    var archivePath = outAsset.Parent / outAsset.NameWithoutExtension;
+                    var outPath = archivePath / outAsset.NameWithoutExtension;
                     var proj = RootDirectory / "src" / "Presentation" / "Presentation.csproj";
                     DotNetTasks.DotNetBuild(_ => _
                         .SetProjectFile(proj)
@@ -101,11 +101,11 @@ class Build : BaseNukeBuildHelpers
                         .SetOutput(outPath));
                     if (os == "linux")
                     {
-                        archivePAth.TarGZipTo(outAsset);
+                        archivePath.TarGZipTo(outAsset);
                     }
                     else if (os == "windows")
                     {
-                        archivePAth.ZipTo(outAsset);
+                        archivePath.ZipTo(outAsset);
                     }
                     else
                     {
