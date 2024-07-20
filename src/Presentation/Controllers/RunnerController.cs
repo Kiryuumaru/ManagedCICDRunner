@@ -86,31 +86,4 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     {
         return _runnerService.Get(id);
     }
-
-    /// <summary>
-    /// Retrieves all Runner entities.
-    /// </summary>
-    /// <returns>An HTTP result containing an array of RunnerTokenEntity.</returns>
-    /// <response code="200">Returns when the operation is successful.</response>
-    /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet("api/runner-runtime")]
-    public Task<HttpResult<RunnerRuntime[]>> GetAllRuntime()
-    {
-        return _runnerService.GetAllRuntime();
-    }
-
-    /// <summary>
-    /// Retrieves a specific Runner entity by its ID.
-    /// </summary>
-    /// <param name="id">The ID of the Runner entity to retrieve.</param>
-    /// <returns>An HTTP result containing the RunnerTokenEntity.</returns>
-    /// <response code="200">Returns when the operation is successful.</response>
-    /// <response code="400">Returns when the provided ID is invalid.</response>
-    /// <response code="404">Returns when the provided ID is not found.</response>
-    /// <response code="500">Returns when an unexpected error occurs.</response>
-    [HttpGet("api/runner-runtime/{id}")]
-    public Task<HttpResult<RunnerRuntime>> GetRuntime(string id)
-    {
-        return _runnerService.GetRuntime(id);
-    }
 }

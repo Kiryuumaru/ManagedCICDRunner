@@ -23,12 +23,7 @@ internal class BasePresentation : BaseApplication
         base.AddServices(builder, services);
 
         services.AddMvc();
-        services.AddControllers()
-            .AddJsonOptions(options =>
-            {
-                options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-            });
+        services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
         {
