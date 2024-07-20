@@ -1,14 +1,20 @@
 using ApplicationBuilderHelpers;
+using CliWrap.EventStream;
 using Infrastructure.SQLite;
 using Presentation;
 using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Application.Common;
 
 if (args.Any(i => i.Equals("--install-service", StringComparison.InvariantCultureIgnoreCase)))
 {
     await installAsService();
+}
+else if (args.Any(i => i.Equals("--uninstall-service", StringComparison.InvariantCultureIgnoreCase)))
+{
+    await uninstallAsService();
 }
 else
 {
@@ -19,6 +25,32 @@ else
 }
 
 async Task installAsService()
+{
+    await prepareSvc();
+
+    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
+    var winswExecPath = currentDir.Trim('\\') + "\\winsw.exe";
+    var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
+
+    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
+    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
+    await Cli.RunOnce($"{winswExecPath} install {serviceConfig}");
+    await Cli.RunOnce($"{winswExecPath} start {serviceConfig}");
+}
+
+async Task uninstallAsService()
+{
+    await prepareSvc();
+
+    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
+    var winswExecPath = currentDir.Trim('\\') + "\\winsw.exe";
+    var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
+
+    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
+    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
+}
+
+async Task prepareSvc()
 {
     await downloadWinsw();
     var config = """
@@ -38,56 +70,6 @@ async Task installAsService()
     var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
     var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
     File.WriteAllText(serviceConfig, config);
-
-    /*
-	Cli::runAndForget(winswBin + " stop \"" + configFile.string() + "\" --force");
-	std::this_thread::sleep_for(std::chrono::seconds(2));
-	Cli::runAndForget(winswBin + " uninstall \"" + configFile.string() + "\"");
-	std::this_thread::sleep_for(std::chrono::seconds(2));
-	Cli::run(winswBin + " install \"" + configFile.string() + "\"");
-	std::this_thread::sleep_for(std::chrono::seconds(2));
-	Cli::run(winswBin + " start \"" + configFile.string() + "\"");
-	std::this_thread::sleep_for(std::chrono::seconds(2));
-
-
-
-
-    
-	std::string svcName = Common::strToLower(name);
-	std::filesystem::path configFile = getSvcDir() / svcName / (svcName + ".xml");
-	std::filesystem::path infoFile = getSvcDir() / svcName / (svcName + ".info.json");
-	if (std::filesystem::exists(infoFile)) {
-		std::string winswBin = "\"" + (getBinDir() / "winsw" / "winsw.exe").string() + "\"";
-		json info = json::parse(Common::readFile(infoFile));
-		std::string binPath = info["binPath"];
-		std::vector<std::string> depProcs = info["depProcs"];
-		for (auto& depProc : depProcs) {
-			killProc(depProc);
-		}
-		killAllProcByDir(getReleasesDir() / svcName);
-		killAllProcByDir(getBinDir() / svcName);
-		killAllProcByDir(getSvcDir() / svcName);
-		Cli::runAndForget(winswBin + " stop \"" + configFile.string() + "\" --force");
-		for (auto& depProc : depProcs) {
-			killProc(depProc);
-		}
-		killAllProcByDir(getReleasesDir() / svcName);
-		killAllProcByDir(getBinDir() / svcName);
-		killAllProcByDir(getSvcDir() / svcName);
-		std::this_thread::sleep_for(std::chrono::seconds(2));
-		Cli::runAndForget(winswBin + " uninstall \"" + configFile.string() + "\"");
-		for (auto& depProc : depProcs) {
-			killProc(depProc);
-		}
-		killAllProcByDir(getReleasesDir() / svcName);
-		killAllProcByDir(getBinDir() / svcName);
-		killAllProcByDir(getSvcDir() / svcName);
-		std::this_thread::sleep_for(std::chrono::seconds(2));
-		std::filesystem::remove_all(configFile.parent_path());
-		return;
-	}
-	throw std::runtime_error("Service " + name + " is not installed");
-     */
 }
 
 async Task downloadWinsw()
