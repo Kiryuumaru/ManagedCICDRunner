@@ -18,6 +18,6 @@ jobs:
       with:
         token: ${{ secrets.GH_PAT }}
     - name: Start nuke bump
-      run: chmod +x ./build.sh && ./build.sh BumpAndForget --args "application_builder_helpers=patch"
+      run: chmod +x ./build.sh && ./build.sh BumpAndForget --args "patch"
       env:
         GITHUB_TOKEN: ${{ secrets.GH_PAT }}
