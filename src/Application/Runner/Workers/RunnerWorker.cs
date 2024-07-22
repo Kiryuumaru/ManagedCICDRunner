@@ -11,7 +11,6 @@ using Domain.Runner.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
 using RestfulHelpers;
 using System;
 using System.Collections.Concurrent;
@@ -37,7 +36,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(2), stoppingToken, Routine, ex => _logger.LogError("Container runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(2), stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
         return Task.CompletedTask;
     }
 
@@ -49,9 +48,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
         var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<RunnerRuntime[]>();
 
+        _logger.LogDebug("Runner routine start...");
+
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
         if (string.IsNullOrEmpty(runnerControllerId))
         {
+            _logger.LogDebug("Setting controller id");
             runnerControllerId = StringHelpers.Random(6, false).ToLowerInvariant();
             (await localStore.Set("runner_controller_id", runnerControllerId, cancellationToken: stoppingToken)).ThrowIfError();
         }
@@ -59,6 +61,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
+
+        _logger.LogDebug("Fetching runner entities...");
 
         List<RunnerRuntime> runnerRuntimes = (await runnerService.GetAll(stoppingToken))
             .GetValueOrThrow()
@@ -69,6 +73,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 RunnerEntity = i
             })
             .ToList();
+
+        _logger.LogDebug("Runner entities: {x}", string.Join(", ", runnerRuntimes.Select(i => i.Id)));
+
+        _logger.LogDebug("Fetching runner actions...");
 
         List<(RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
         foreach (var runnerRuntime in runnerRuntimes)
@@ -95,6 +103,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
+        _logger.LogDebug("Runner actions: {x}", string.Join(", ", allRunnerActions.Select(i => i.RunnerAction.Name)));
+
+        _logger.LogDebug("Checking for dangling actions...");
+
         foreach (var (RunnerEntity, RunnerAction) in allRunnerActions.ToArray())
         {
             var nameSplit = RunnerAction.Name.Split('-');
@@ -115,6 +127,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 };
             }
         }
+
+        _logger.LogDebug("Fetching runner containers...");
 
         List<DockerContainer> allDockerContainers = [];
         allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Linux));
@@ -156,6 +170,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 }
             }
         }
+
+        _logger.LogDebug("Runner containers: {x}", string.Join(", ", allDockerContainers.Select(i => i.Name)));
+
+        _logger.LogDebug("Checking for deleted runners...");
 
         foreach (var runnerRuntime in runnerRuntimes.ToArray())
         {
@@ -202,6 +220,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 }
             }
         }
+
+        _logger.LogDebug("Checking for runners to upscale");
 
         var oldRunnerRuntimes = await runnerRuntimeHolder.Get() ?? [];
 
@@ -290,6 +310,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
 
         await runnerRuntimeHolder.Set(() => [.. runnerRuntimes]);
+
+        _logger.LogDebug("Runner routine end");
     }
 
     private static async Task Execute(HttpClient httpClient, HttpMethod httpMethod, RunnerEntity runnerEntity, string segement, CancellationToken cancellationToken)
