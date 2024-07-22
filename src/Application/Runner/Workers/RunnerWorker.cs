@@ -144,9 +144,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     if (runnerRuntime.Runners.TryGetValue(container.Name, out var runner))
                     {
                         RunnerStatus status = RunnerStatus.Building;
-                        if (runner.RunnerAction != null)
+                        if (runner.DockerContainer != null && runner.RunnerAction != null)
                         {
                             status = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                        }
+                        else if (runner.DockerContainer != null)
+                        {
+                            status = RunnerStatus.Starting;
                         }
                         runner = new RunnerInstance()
                         {
