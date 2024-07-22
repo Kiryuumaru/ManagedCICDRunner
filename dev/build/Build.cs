@@ -134,14 +134,14 @@ class Build : BaseNukeBuildHelpers
                         throw new NotSupportedException();
                     }
 
-                    (OutputDirectory / $"installer_{runtime}.ps1").WriteAllText((RootDirectory / "installerTemplate.ps1").ReadAllText()
+                    (OutputDirectory / $"installer_{os}_{arch}.ps1").WriteAllText((RootDirectory / "installerTemplate.ps1").ReadAllText()
                         .Replace("{{$tag}}", "build.5")
                         .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                         .Replace("{{$appname}}", $"ManagedCICDRunner_{runtime}")
                         .Replace("{{$appexec}}", "Presentation.exe")
                         .Replace("{{$rootextract}}", $"ManagedCICDRunner_{runtime}"));
 
-                    (OutputDirectory / $"uninstaller_{runtime}.ps1").WriteAllText((RootDirectory / "uninstallerTemplate.ps1").ReadAllText()
+                    (OutputDirectory / $"uninstaller_{os}_{arch}.ps1").WriteAllText((RootDirectory / "uninstallerTemplate.ps1").ReadAllText()
                         .Replace("{{$tag}}", "build.5")
                         .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                         .Replace("{{$appname}}", $"ManagedCICDRunner_{runtime}")
