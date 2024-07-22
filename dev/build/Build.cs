@@ -59,6 +59,25 @@ class Build : BaseNukeBuildHelpers
         }
     }
 
+    AbsolutePath[] GetAssets(string os, string arch)
+    {
+        List<AbsolutePath> assets = [];
+
+        assets.Add(GetOutAsset(os, arch));
+
+        if (os == "linux")
+        {
+        }
+        else if (os == "windows")
+        {
+            assets.Add(OutputDirectory / $"installer_{os}_{arch}.ps1");
+            assets.Add(OutputDirectory / $"uninstaller_{os}_{arch}.ps1");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+
         return [.. assets];
     }
 
