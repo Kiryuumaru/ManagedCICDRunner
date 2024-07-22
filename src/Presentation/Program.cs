@@ -63,6 +63,7 @@ async Task prepareSvc()
           <outfilepattern>.output.log</outfilepattern>
           <errfilepattern>.error.log</errfilepattern>
           <combinedfilepattern>.combined.log</combinedfilepattern>
+          <env name="ASPNETCORE_URLS" value="http://*:5000" />
         </service>
         """;
     var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
