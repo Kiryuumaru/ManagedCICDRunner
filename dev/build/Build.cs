@@ -19,6 +19,7 @@ using NukeBuildHelpers.Runner.Abstraction;
 using NukeBuildHelpers.RunContext.Extensions;
 using NukeBuildHelpers.Pipelines.Common.Enums;
 using NukeBuildHelpers.Pipelines.Github.Models;
+using System.Collections.Generic;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -58,6 +59,28 @@ class Build : BaseNukeBuildHelpers
         }
     }
 
+    AbsolutePath[] GetAssets(string os, string arch)
+    {
+        List<AbsolutePath> assets = [];
+
+        assets.Add(GetOutAsset(os, arch));
+
+        if (os == "linux")
+        {
+        }
+        else if (os == "windows")
+        {
+            assets.Add(OutputDirectory / $"installer_{os}_{arch}.ps1");
+            assets.Add(OutputDirectory / $"uninstaller_{os}_{arch}.ps1");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+
+        return [.. assets];
+    }
+
     BuildEntry BuildEdgeGridBinaries => _ => _
         .AppId("managed-cicd-runner")
         .Matrix(osMatrix, (definitionOs, os) =>
@@ -74,7 +97,7 @@ class Build : BaseNukeBuildHelpers
                 string runtime = $"{os.ToLowerInvariant()}-{arch.ToLowerInvariant()}";
                 definitionArch.WorkflowId($"build_{os}_{arch}");
                 definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
-                definitionArch.ReleaseAsset(context => [GetOutAsset(os, arch)]);
+                definitionArch.ReleaseAsset(context => GetAssets(os, arch));
                 definitionArch.Execute(context =>
                 {
                     var outAsset = GetOutAsset(os, arch);
@@ -110,6 +133,20 @@ class Build : BaseNukeBuildHelpers
                     {
                         throw new NotSupportedException();
                     }
+
+                    (OutputDirectory / $"installer_{runtime}.ps1").WriteAllText((RootDirectory / "installerTemplate.ps1").ReadAllText()
+                        .Replace("{{$tag}}", "build.5")
+                        .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
+                        .Replace("{{$appname}}", $"ManagedCICDRunner_{runtime}")
+                        .Replace("{{$appexec}}", "Presentation.exe")
+                        .Replace("{{$rootextract}}", $"ManagedCICDRunner_{runtime}"));
+
+                    (OutputDirectory / $"uninstaller_{runtime}.ps1").WriteAllText((RootDirectory / "uninstallerTemplate.ps1").ReadAllText()
+                        .Replace("{{$tag}}", "build.5")
+                        .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
+                        .Replace("{{$appname}}", $"ManagedCICDRunner_{runtime}")
+                        .Replace("{{$appexec}}", "Presentation.exe")
+                        .Replace("{{$rootextract}}", $"ManagedCICDRunner_{runtime}"));
                 });
             });
         });
