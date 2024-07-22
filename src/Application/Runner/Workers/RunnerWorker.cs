@@ -284,7 +284,11 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 runnerRuntime.RunnerEntity.RunnerOS,
                                 runnerRuntime.RunnerEntity.Image,
                                 runnerRuntime.RunnerEntity.Id);
-                            await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, name);
+                            try
+                            {
+                                await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, name);
+                            }
+                            catch { }
                             await dockerService.Run(
                                 runnerRuntime.RunnerEntity.RunnerOS,
                                 name,
