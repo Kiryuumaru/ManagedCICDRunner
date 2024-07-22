@@ -20,6 +20,7 @@ using NukeBuildHelpers.RunContext.Extensions;
 using NukeBuildHelpers.Pipelines.Common.Enums;
 using NukeBuildHelpers.Pipelines.Github.Models;
 using System.Collections.Generic;
+using NukeBuildHelpers.Common;
 
 class Build : BaseNukeBuildHelpers
 {
@@ -121,6 +122,7 @@ class Build : BaseNukeBuildHelpers
                         })
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
+                    (RootDirectory / "dockers").CopyRecursively(outPath / "dockers");
                     if (os == "linux")
                     {
                         archivePath.TarGZipTo(outAsset);
