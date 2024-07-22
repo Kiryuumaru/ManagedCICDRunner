@@ -180,7 +180,7 @@ public class DockerService(ILogger<DockerService> logger)
     {
         return runnerOS switch
         {
-            RunnerOSType.Linux => "wsl docker",
+            RunnerOSType.Linux => "wsl docker --exec",
             RunnerOSType.Windows => "docker",
             _ => throw new NotSupportedException()
         };
