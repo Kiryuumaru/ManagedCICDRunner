@@ -143,21 +143,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     if (runnerRuntime.Runners.TryGetValue(container.Name, out var runner))
                     {
-                        RunnerStatus status = RunnerStatus.Building;
-                        if (runner.DockerContainer != null && runner.RunnerAction != null)
-                        {
-                            status = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
-                        }
-                        else if (runner.DockerContainer != null)
-                        {
-                            status = RunnerStatus.Starting;
-                        }
                         runner = new RunnerInstance()
                         {
                             Name = containerRunnerName,
                             RunnerAction = runner.RunnerAction,
                             DockerContainer = container,
-                            Status = status
+                            Status = RunnerStatus.Building
                         };
                     }
                     else
@@ -167,7 +158,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             Name = containerRunnerName,
                             RunnerAction = null,
                             DockerContainer = container,
-                            Status = RunnerStatus.Building
+                            Status = RunnerStatus.Starting
                         };
                     }
                     runnerRuntime.Runners[containerRunnerName] = runner;
@@ -222,6 +213,31 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         }
                     }
                 }
+            }
+        }
+
+        _logger.LogDebug("Checking for runner status");
+
+        foreach (var runnerRuntime in runnerRuntimes.ToArray())
+        {
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                RunnerStatus status = RunnerStatus.Building;
+                if (runner.DockerContainer != null && runner.RunnerAction != null)
+                {
+                    status = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                }
+                else if (runner.DockerContainer != null)
+                {
+                    status = RunnerStatus.Starting;
+                }
+                runnerRuntime.Runners[runner.Name] = new RunnerInstance()
+                {
+                    Name = runner.Name,
+                    RunnerAction = runner.RunnerAction,
+                    DockerContainer = runner.DockerContainer,
+                    Status = status
+                };
             }
         }
 

@@ -122,7 +122,7 @@ public class DockerService(ILogger<DockerService> logger)
 
     public async Task Build(RunnerOSType runnerOS, string image, string runnerId)
     {
-        string? localDockerfile = GetLocalDockerfilePath(runnerOS, image);
+        string? localDockerfile = GetLocalDockerfilePath(image);
 
         string dockerCmd = GetDockerCommand(runnerOS);
 
@@ -144,7 +144,7 @@ public class DockerService(ILogger<DockerService> logger)
 
     public async Task Run(RunnerOSType runnerOS, string name, string image, string runnerId, Dictionary<string, string> labels, int cpus, int memoryGB, string input, Dictionary<string, string> envVars)
     {
-        string? localDockerfile = GetLocalDockerfilePath(runnerOS, image);
+        string? localDockerfile = GetLocalDockerfilePath(image);
 
         string dockerCmd = GetDockerCommand(runnerOS);
         string dockerEntrypoint = GetDockerEntrypoint(runnerOS);
@@ -180,8 +180,8 @@ public class DockerService(ILogger<DockerService> logger)
     {
         return runnerOS switch
         {
-            RunnerOSType.Linux => "wsl --exec docker",
-            RunnerOSType.Windows => "docker",
+            RunnerOSType.Linux => "docker -H \"npipe:////./pipe/docker_engine_linux\"",
+            RunnerOSType.Windows => "docker -H \"npipe:////./pipe/docker_engine_windows\"",
             _ => throw new NotSupportedException()
         };
     }
@@ -196,7 +196,7 @@ public class DockerService(ILogger<DockerService> logger)
         };
     }
 
-    private static string? GetLocalDockerfilePath(RunnerOSType runnerOS, string image)
+    private static string? GetLocalDockerfilePath(string image)
     {
         string? localDockerfile = null;
         if (Path.IsPathRooted(image) && AbsolutePath.Parse(image).FileExists())
@@ -209,23 +209,7 @@ public class DockerService(ILogger<DockerService> logger)
         }
         if (localDockerfile != null)
         {
-            if (runnerOS == RunnerOSType.Linux)
-            {
-                localDockerfile = localDockerfile.Replace("\\", "/");
-                var localDockerfileSplit = localDockerfile.Split(':');
-                if (localDockerfileSplit.Length > 1)
-                {
-                    localDockerfile = $"/mnt/{localDockerfileSplit[0].ToLower()}/{localDockerfileSplit[1]}";
-                }
-            }
-            else if (runnerOS == RunnerOSType.Windows)
-            {
-                localDockerfile = localDockerfile.Replace("/", "\\");
-            }
-            else
-            {
-                throw new NotSupportedException();
-            }
+            localDockerfile = localDockerfile.Replace("/", "\\");
         }
         return localDockerfile;
     }
