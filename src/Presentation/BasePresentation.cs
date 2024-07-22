@@ -48,11 +48,8 @@ internal class BasePresentation : BaseApplication
     {
         base.AddMiddlewares(builder, host);
 
-        if ((host as WebApplication)!.Environment.IsDevelopment())
-        {
-            (host as IApplicationBuilder)!.UseSwagger();
-            (host as IApplicationBuilder)!.UseSwaggerUI();
-        }
+        (host as IApplicationBuilder)!.UseSwagger();
+        (host as IApplicationBuilder)!.UseSwaggerUI();
 
         (host as IApplicationBuilder)!.UseHttpsRedirection();
     }
