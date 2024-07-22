@@ -28,9 +28,8 @@ async Task installAsService()
 {
     await prepareSvc();
 
-    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
-    var winswExecPath = currentDir.Trim('\\') + "\\winsw.exe";
-    var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
+    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
+    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
     await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
     await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
@@ -42,9 +41,8 @@ async Task uninstallAsService()
 {
     await prepareSvc();
 
-    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
-    var winswExecPath = currentDir.Trim('\\') + "\\winsw.exe";
-    var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
+    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
+    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
     await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
     await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
@@ -67,15 +65,13 @@ async Task prepareSvc()
           <combinedfilepattern>.combined.log</combinedfilepattern>
         </service>
         """;
-    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
-    var serviceConfig = currentDir.Trim('\\') + "\\svc.xml";
+    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
     File.WriteAllText(serviceConfig, config);
 }
 
 async Task downloadWinsw()
 {
-    var currentDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
-    var winswExecPath = currentDir.Trim('\\') + "\\winsw.exe";
+    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
     if (File.Exists(winswExecPath))
     {
         return;
@@ -94,7 +90,7 @@ async Task downloadWinsw()
         throw new NotSupportedException();
     }
     string dlUrl = $"https://github.com/Kiryuumaru/winsw-modded/releases/download/build.1/{folderName}.zip";
-    var downloadsPath = currentDir.Trim('\\') + "\\downloads";
+    var downloadsPath = Environment.CurrentDirectory.Trim('\\') + "\\downloads";
     var winswZipPath = downloadsPath + "\\winsw.zip";
     var winswZipExtractPath = downloadsPath + "\\winsw";
     var winswDownloadedExecPath = winswZipExtractPath + $"\\{folderName}\\winsw.exe";
