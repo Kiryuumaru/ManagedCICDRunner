@@ -142,12 +142,11 @@ public class DockerService(ILogger<DockerService> logger)
         await Cli.RunListenAndLog(_logger, prepareCmd);
     }
 
-    public async Task Run(RunnerOSType runnerOS, string name, string image, string runnerId, Dictionary<string, string> labels, int cpus, int memoryGB, string input, Dictionary<string, string> envVars)
+    public async Task Run(RunnerOSType runnerOS, string name, string image, string runnerId, int cpus, int memoryGB, string? input, string? args)
     {
         string? localDockerfile = GetLocalDockerfilePath(image);
 
         string dockerCmd = GetDockerCommand(runnerOS);
-        string dockerEntrypoint = GetDockerEntrypoint(runnerOS);
 
         string actualImage;
         if (localDockerfile != null)
@@ -159,19 +158,24 @@ public class DockerService(ILogger<DockerService> logger)
             actualImage = image;
         }
 
-        string runCmd = $"{dockerCmd} run --name \"{name}\" --cpus=\"{cpus}\" --memory=\"{memoryGB}g\" -d --rm --entrypoint {dockerEntrypoint}";
+        string runCmd = $"{dockerCmd} run --name \"{name}\" --cpus=\"{cpus}\" --memory=\"{memoryGB}g\" -d --rm";
 
-        foreach (var label in labels)
+        if (!string.IsNullOrEmpty(input))
         {
-            runCmd += $" -l \"{label.Key}={label.Value}\"";
+            runCmd += $" --entrypoint {GetDockerEntrypoint(runnerOS)}";
         }
 
-        foreach (var envVar in envVars)
+        if (!string.IsNullOrEmpty(args))
         {
-            runCmd += $" -e \"{envVar.Key}={envVar.Value}\"";
+            runCmd += $" {args}";
         }
 
-        runCmd += $" {actualImage} -c \"{input}\"";
+        runCmd += $" {actualImage}";
+
+        if (!string.IsNullOrEmpty(input))
+        {
+            runCmd += $" -c \"{input}\"";
+        }
 
         await Cli.RunListenAndLog(_logger, runCmd, null);
     }

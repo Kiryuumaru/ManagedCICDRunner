@@ -19,6 +19,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection.Emit;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -29,6 +30,27 @@ namespace Application.Runner.Workers;
 
 internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider serviceProvider) : BackgroundService
 {
+    private readonly static AbsolutePath ActionsRunnerDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "Mount";
+    private readonly static AbsolutePath LinuxActionsRunnerDir = ActionsRunnerDir / "linux";
+    private readonly static AbsolutePath WindowsActionsRunnerDir = ActionsRunnerDir / "windows";
+    private readonly static AbsolutePath LinuxActionsRunner = LinuxActionsRunnerDir / "actions-runner-linux-x64.tar.gz";
+    private readonly static AbsolutePath WindowsActionsRunner = WindowsActionsRunnerDir / "actions-runner-win-x64.zip";
+
+    private readonly static (string OS, string Url, string Hash, AbsolutePath Path)[] HostAssetMatrix =
+    [
+        (
+            "linux",
+            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz",
+            "9e883d210df8c6028aff475475a457d380353f9d01877d51cc01a17b2a91161d",
+            LinuxActionsRunner
+        ), (
+            "windows",
+            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-win-x64-2.317.0.zip",
+            "a74dcd1612476eaf4b11c15b3db5a43a4f459c1d3c1807f8148aeb9530d69826",
+            WindowsActionsRunner
+        )
+    ];
+
     private readonly ILogger<RunnerWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly List<string> busyRevs = [];
@@ -61,6 +83,36 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
+
+        _logger.LogDebug("Checking common assets...");
+        List<Task> commonAssetsTasks = [];
+        foreach (var (os, url, hash, actionRunnersPath) in HostAssetMatrix)
+        {
+            commonAssetsTasks.Add(Task.Run(async () =>
+            {
+                while (!actionRunnersPath.FileExists() || !FileHasher.GetFileHash(actionRunnersPath).Equals(hash, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    _logger.LogInformation("Downloading common asset {}...", url);
+                    try
+                    {
+                        if (actionRunnersPath.FileExists())
+                        {
+                            actionRunnersPath.DeleteFile();
+                        }
+                        using var s = await httpClient.GetStreamAsync(url, stoppingToken);
+                        using var fs = new FileStream(actionRunnersPath, FileMode.OpenOrCreate);
+                        await s.CopyToAsync(fs, stoppingToken);
+                        _logger.LogInformation("Downloading common asset {} done", url);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError("Downloading common asset {} error: {}", url, ex);
+                        await Task.Delay(2000, stoppingToken);
+                    }
+                }
+            }, stoppingToken));
+        }
+        await Task.WhenAll(commonAssetsTasks);
 
         _logger.LogDebug("Fetching runner entities...");
 
@@ -131,6 +183,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         _logger.LogDebug("Fetching runner containers...");
 
         List<DockerContainer> allDockerContainers = [];
+        DockerContainer? cacheContainer = null;
         allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Linux));
         allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Windows));
         foreach (var container in allDockerContainers)
@@ -164,6 +217,42 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     runnerRuntime.Runners[containerRunnerName] = runner;
                 }
             }
+            else if (container.Labels.TryGetValue("cicd.self_runner_cache_for", out _))
+            {
+                cacheContainer = container;
+            }
+        }
+
+        if (cacheContainer == null)
+        {
+            string key = $"managed_runner-{runnerControllerId}-cache_container";
+            RevExecute(key, async () =>
+            {
+                try
+                {
+                    RunnerOSType runnerOS = RunnerOSType.Linux;
+                    string name = $"{key}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                    string image = "ghcr.io/falcondev-oss/github-actions-cache-server:latest";
+                    string runnerId = $"managed_runner-{runnerControllerId}";
+                    string dockerArgs = "";
+                    dockerArgs += $" -l \"cicd.self_runner_cache_for={runnerControllerId}\"";
+                    dockerArgs += $" -e \"URL_ACCESS_TOKEN=awdawd\"";
+                    dockerArgs += $" -e \"API_BASE_URL=http://localhost:3000\"";
+                    dockerArgs += $" -v \"cache-data-{runnerControllerId}:/app/.data\"";
+                    dockerArgs += $" -p \"3000:3000\"";
+                    dockerArgs += " --add-host host.docker.internal=host-gateway";
+                    await dockerService.Build(runnerOS, image, runnerId);
+                    await dockerService.Run(runnerOS, name, image, runnerId, 2, 4, null, dockerArgs);
+                    _logger.LogInformation("Runner cache container created (up): {id}", name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation("Runner cache container init error: {ex}", ex.Message);
+                }
+            }, () =>
+            {
+                _logger.LogInformation("Runner cache container init (pending): {rev}", key);
+            });
         }
 
         _logger.LogDebug("Runner containers: {x}", string.Join(", ", allDockerContainers.Select(i => i.Name)));
@@ -277,44 +366,77 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 RunnerAction = null,
                                 Status = RunnerStatus.Building
                             };
-                            string args = $"--name {name} --url {GetConfigUrl(runnerRuntime.RunnerEntity)} --ephemeral --unattended";
+                            string inputArgs = $"--name {name} --url {GetConfigUrl(runnerRuntime.RunnerEntity)} --ephemeral --unattended";
                             var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerRuntime.RunnerEntity, "actions/runners/registration-token", stoppingToken);
-                            args += $" --token {tokenResponse["token"]}";
-                            Dictionary<string, string> labels = [];
-                            labels["cicd.self_runner_id"] = runnerRuntime.RunnerEntity.Id;
-                            labels["cicd.self_runner_rev"] = runnerRuntime.RunnerEntity.Rev;
-                            labels["cicd.self_runner_name"] = name;
-                            Dictionary<string, string> envVars = [];
-                            envVars["RUNNER_ALLOW_RUNASROOT"] = "1";
+                            inputArgs += $" --token {tokenResponse["token"]}";
                             if (runnerRuntime.RunnerEntity.Labels.Length != 0)
                             {
-                                args += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
+                                inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
                             }
                             if (!string.IsNullOrEmpty(runnerRuntime.RunnerEntity.Group))
                             {
-                                args += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
+                                inputArgs += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
                             }
-                            string input = GetInputCommand(runnerRuntime.RunnerEntity.RunnerOS, args);
                             _logger.LogInformation("Runner preparing: {id}", name);
-                            await dockerService.Build(
-                                runnerRuntime.RunnerEntity.RunnerOS,
-                                runnerRuntime.RunnerEntity.Image,
-                                runnerRuntime.RunnerEntity.Id);
+                            RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
+                            string image = runnerRuntime.RunnerEntity.Image;
+                            string runnerId = runnerRuntime.RunnerEntity.Id;
+                            int cpus = runnerRuntime.RunnerEntity.Cpus;
+                            int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
+                            string input;
+                            string dockerArgs = "";
+                            if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                            {
+                                input = $"""
+                                    mkdir /actions-runner
+                                    cd /actions-runner
+                                    cp -r /host-assets/* ./
+                                    ./bootstrap.sh
+                                    ./config.sh {inputArgs}
+                                    ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" ./run.sh
+                                    """
+                                    .Replace("\n\r", " && ")
+                                    .Replace("\r\n", " && ")
+                                    .Replace("\n", " && ")
+                                    .Replace("\"", "\\\"");
+                                var wslPath = LinuxActionsRunnerDir.ToString().Replace("\\", "/").Replace(":", "");
+                                wslPath = wslPath[0].ToString().ToLowerInvariant() + wslPath[1..].ToString();
+                                wslPath = "/mnt/" + wslPath;
+                                dockerArgs += $" -v \"{wslPath}:/host-assets\"";
+                            }
+                            else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                            {
+                                input = $"""
+                                    $ErrorActionPreference='Stop' ; $ProgressPreference='Continue' ; $verbosePreference='Continue'
+                                    mkdir C:\actions-runner
+                                    cd C:\actions-runner                     
+                                    Copy-Item "C:\host-assets\*" -Destination "$PWD" -Recurse -Force
+                                    ./bootstrap.ps1
+                                    ./config.cmd {inputArgs}
+                                    $env:ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"; ./run.cmd
+                                    """
+                                    .Replace("\n\r", " ; ")
+                                    .Replace("\r\n", " ; ")
+                                    .Replace("\n", " ; ")
+                                    .Replace("\"", "\\\"");
+                                dockerArgs += $" -v \"{WindowsActionsRunnerDir}:C:\\host-assets\"";
+                            }
+                            else
+                            {
+                                throw new NotSupportedException();
+                            }
+                            dockerArgs += $" -l \"cicd.self_runner_id={runnerRuntime.RunnerEntity.Id}\"";
+                            dockerArgs += $" -l \"cicd.self_runner_rev={runnerRuntime.RunnerEntity.Rev}\"";
+                            dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
+                            dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
+                            dockerArgs += " --add-host host.docker.internal=host-gateway";
+                            await dockerService.Build(runnerOs, image, runnerId);
                             try
                             {
-                                await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, name);
+                                await dockerService.DeleteContainer(runnerOs, name);
                             }
                             catch { }
-                            await dockerService.Run(
-                                runnerRuntime.RunnerEntity.RunnerOS,
-                                name,
-                                runnerRuntime.RunnerEntity.Image,
-                                runnerRuntime.RunnerEntity.Id,
-                                labels,
-                                runnerRuntime.RunnerEntity.Cpus,
-                                runnerRuntime.RunnerEntity.MemoryGB,
-                                input,
-                                envVars);
+                            await dockerService.Run(runnerOs, name, image, runnerId, cpus, memoryGB, input, dockerArgs);
                             _logger.LogInformation("Runner created (up): {id}", name);
                         }
                         catch (Exception ex)
@@ -382,47 +504,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
         }
-    }
-
-    private static string GetInputCommand(RunnerOSType runnerOS, string args)
-    {
-        string input;
-        if (runnerOS == RunnerOSType.Linux)
-        {
-            input = $"""
-                mkdir actions-runner && cd actions-runner
-                curl -o actions-runner-linux-x64-2.317.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz
-                tar xzf ./actions-runner-linux-x64-2.317.0.tar.gz
-                sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
-                ./bin/installdependencies.sh
-                ./config.sh {args}
-                ACTIONS_CACHE_URL="http://localhost:3000/awdawd/" ./run.sh
-                """
-                .Replace("\n\r", " && ")
-                .Replace("\r\n", " && ")
-                .Replace("\n", " && ")
-                .Replace("\"", "\\\"");
-        }
-        else if (runnerOS == RunnerOSType.Windows)
-        {
-            input = $"""
-                $ErrorActionPreference='Stop' ; $ProgressPreference='Continue' ; $verbosePreference='Continue' ; mkdir actions-runner ; cd actions-runner
-                Invoke-WebRequest -Uri https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-win-x64-2.317.0.zip -OutFile actions-runner-win-x64-2.317.0.zip
-                Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory("$PWD/actions-runner-win-x64-2.317.0.zip", "$PWD")
-                (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
-                ./config.cmd {args}
-                $env:ACTIONS_CACHE_URL="http://localhost:3000/awdawd/"; ./run.cmd
-                """
-                .Replace("\n\r", " ; ")
-                .Replace("\r\n", " ; ")
-                .Replace("\n", " ; ")
-                .Replace("\"", "\\\"");
-        }
-        else
-        {
-            throw new NotSupportedException();
-        }
-        return input;
     }
 
     private async void RevExecute(string key, Func<Task> exec, Action busy)

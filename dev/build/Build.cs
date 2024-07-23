@@ -122,7 +122,6 @@ class Build : BaseNukeBuildHelpers
                         })
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
-                    (RootDirectory / "dockers").CopyRecursively(outPath / "dockers");
                     if (os == "linux")
                     {
                         archivePath.TarGZipTo(outAsset);
@@ -135,6 +134,9 @@ class Build : BaseNukeBuildHelpers
                     {
                         throw new NotSupportedException();
                     }
+
+                    (RootDirectory / "dockers").CopyRecursively(outPath / "dockers");
+                    (RootDirectory / "Mount").CopyRecursively(outPath / "Mount");
 
                     if (context.TryGetVersionedContext(out var versioned))
                     {
