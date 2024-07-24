@@ -5,6 +5,7 @@ using Domain.Docker.Enums;
 using Domain.Docker.Models;
 using Domain.Runner.Entities;
 using Domain.Runner.Enums;
+using Domain.Runner.Models;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -14,7 +15,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TransactionHelpers;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace Application.Docker.Services;
 
@@ -120,7 +120,66 @@ public class DockerService(ILogger<DockerService> logger)
         }
     }
 
-    public async Task Build(RunnerOSType runnerOS, string image, string runnerId)
+    public async Task<DockerImage[]> GetImages(RunnerOSType runnerOS)
+    {
+        List<DockerImage> dockerImages = [];
+
+        string dockerCmd = GetDockerCommand(runnerOS);
+
+        await foreach (var commandEvent in Cli.RunListen($"{dockerCmd} image ls --all --no-trunc --format \"{{{{json .}}}}\""))
+        {
+            string line = "";
+            switch (commandEvent)
+            {
+                case StandardOutputCommandEvent outEvent:
+                    _logger.LogDebug("{x}", outEvent.Text);
+                    line = outEvent.Text;
+                    break;
+                case StandardErrorCommandEvent errEvent:
+                    _logger.LogDebug("{x}", errEvent.Text);
+                    line = errEvent.Text;
+                    break;
+            }
+            if (!string.IsNullOrEmpty(line))
+            {
+                var containerRaw = JsonSerializer.Deserialize<Dictionary<string, string>>(line)!;
+                dockerImages.Add(new()
+                {
+                    Repository = containerRaw["Repository"],
+                    Tag = containerRaw["Tag"]
+                });
+            }
+        }
+
+        return [.. dockerImages];
+    }
+
+    public async Task DeleteImages(RunnerOSType runnerOS, params string[] images)
+    {
+        string dockerCmd = GetDockerCommand(runnerOS);
+
+        foreach (var image in images)
+        {
+            try
+            {
+                await foreach (var commandEvent in Cli.RunListen($"{dockerCmd} rmi --force {image}"))
+                {
+                    switch (commandEvent)
+                    {
+                        case StandardOutputCommandEvent outEvent:
+                            _logger.LogDebug("{x}", outEvent.Text);
+                            break;
+                        case StandardErrorCommandEvent errEvent:
+                            _logger.LogDebug("{x}", errEvent.Text);
+                            break;
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    public async Task<string> Build(RunnerOSType runnerOS, string image, string imageName)
     {
         string? localDockerfile = GetLocalDockerfilePath(image);
 
@@ -130,7 +189,7 @@ public class DockerService(ILogger<DockerService> logger)
         string actualImage;
         if (localDockerfile != null)
         {
-            actualImage = $"{runnerId}:latest".ToLowerInvariant();
+            actualImage = imageName.ToLowerInvariant();
             prepareCmd = $"{dockerCmd} build -t {actualImage} -f \"{localDockerfile}\" .";
         }
         else
@@ -140,6 +199,8 @@ public class DockerService(ILogger<DockerService> logger)
         }
 
         await Cli.RunListenAndLog(_logger, prepareCmd);
+
+        return actualImage;
     }
 
     public async Task Run(RunnerOSType runnerOS, string name, string image, string runnerId, int cpus, int memoryGB, string? input, string? args)

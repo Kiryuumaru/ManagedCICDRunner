@@ -11,12 +11,15 @@ using Domain.Runner.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using RestfulHelpers;
+using RestfulHelpers.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Reflection.Emit;
@@ -25,16 +28,21 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Application.Runner.Workers;
 
 internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider serviceProvider) : BackgroundService
 {
-    private readonly static AbsolutePath ActionsRunnerDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "Mount";
-    private readonly static AbsolutePath LinuxActionsRunnerDir = ActionsRunnerDir / "linux";
-    private readonly static AbsolutePath WindowsActionsRunnerDir = ActionsRunnerDir / "windows";
-    private readonly static AbsolutePath LinuxActionsRunner = LinuxActionsRunnerDir / "actions-runner-linux-x64.tar.gz";
-    private readonly static AbsolutePath WindowsActionsRunner = WindowsActionsRunnerDir / "actions-runner-win-x64.zip";
+    private readonly ILogger<RunnerWorker> _logger = logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+
+    private readonly static AbsolutePath HostAssetsDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "HostAssets";
+    private readonly static AbsolutePath LinuxHostAssetsDir = HostAssetsDir / "linux";
+    private readonly static AbsolutePath WindowsHostAssetsDir = HostAssetsDir / "windows";
+    private readonly static AbsolutePath LinuxActionsRunner = LinuxHostAssetsDir / "actions-runner-linux-x64.tar.gz";
+    private readonly static AbsolutePath WindowsActionsRunner = WindowsHostAssetsDir / "actions-runner-win-x64.zip";
+    private readonly static AbsolutePath ActionsRunnerDockerfilesDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "Dockerfiles" / ".ActionsRunner";
 
     private readonly static (string OS, string Url, string Hash, AbsolutePath Path)[] HostAssetMatrix =
     [
@@ -51,14 +59,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         )
     ];
 
-    private readonly ILogger<RunnerWorker> _logger = logger;
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
-    private readonly List<string> busyRevs = [];
-    private readonly SemaphoreSlim busyRevsLocker = new(1);
+    private readonly ExecutorLocker executorLocker = new();
+
+    private readonly Dictionary<string, RunnerRuntime> runnerRuntimes = [];
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(2), stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
         return Task.CompletedTask;
     }
 
@@ -116,25 +123,46 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         _logger.LogDebug("Fetching runner entities...");
 
-        List<RunnerRuntime> runnerRuntimes = (await runnerService.GetAll(stoppingToken))
-            .GetValueOrThrow()
-            .Select(i => new RunnerRuntime()
+        foreach (var runnerEntity in (await runnerService.GetAll(stoppingToken)).GetValueOrThrow())
+        {
+            RunnerRuntime runnerRuntime;
+            if (runnerRuntimes.TryGetValue(runnerEntity.Id, out var existingRunnerRuntime))
             {
-                Id = i.Id,
-                Rev = i.Rev,
-                RunnerEntity = i
-            })
-            .ToList();
+                runnerRuntime = new RunnerRuntime()
+                {
+                    Id = runnerEntity.Id,
+                    Rev = runnerEntity.Rev,
+                    RunnerEntity = runnerEntity,
+                    Runners = existingRunnerRuntime.Runners
+                };
+            }
+            else
+            {
+                runnerRuntime = new RunnerRuntime()
+                {
+                    Id = runnerEntity.Id,
+                    Rev = runnerEntity.Rev,
+                    RunnerEntity = runnerEntity
+                };
+            }
+            runnerRuntimes[runnerRuntime.Id] = runnerRuntime;
+        }
 
-        _logger.LogDebug("Runner entities: {x}", string.Join(", ", runnerRuntimes.Select(i => i.Id)));
+        _logger.LogDebug("Runner entities: {x}", string.Join(", ", runnerRuntimes.Select(i => i.Value.Id)));
 
         _logger.LogDebug("Fetching runner actions...");
 
-        List<(RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
-        foreach (var runnerRuntime in runnerRuntimes)
+        List<(string RunnerId, RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
+        Dictionary<string, JsonDocument> cachedGetRunnersAction = [];
+        foreach (var runnerRuntime in runnerRuntimes.Values)
         {
             var runnerListResult = await Execute<JsonDocument>(httpClient, HttpMethod.Get, runnerRuntime.RunnerEntity, "actions/runners", stoppingToken);
-            foreach (var runnerJson in runnerListResult.RootElement.GetProperty("runners").EnumerateArray())
+            if (runnerListResult.IsError && runnerListResult.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                continue;
+            }
+            runnerListResult.ThrowIfErrorOrHasNoValue();
+            foreach (var runnerJson in runnerListResult.Value.RootElement.GetProperty("runners").EnumerateArray())
             {
                 string name = runnerJson.GetProperty("name").GetString()!;
                 var nameSplit = name.Split('-');
@@ -142,9 +170,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     string id = runnerJson.GetProperty("id").GetInt32().ToString();
                     bool busy = runnerJson.GetProperty("busy").GetBoolean();
+                    var runnerId = nameSplit[2];
                     if (!allRunnerActions.Any(i => i.RunnerAction.Name == name))
                     {
-                        allRunnerActions.Add((runnerRuntime.RunnerEntity, new RunnerAction()
+                        allRunnerActions.Add((runnerId, runnerRuntime.RunnerEntity, new RunnerAction()
                         {
                             Id = id,
                             Name = name,
@@ -159,13 +188,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         _logger.LogDebug("Checking for dangling actions...");
 
-        foreach (var (RunnerEntity, RunnerAction) in allRunnerActions.ToArray())
+        foreach (var (RunnerId, RunnerEntity, RunnerAction) in allRunnerActions.ToArray())
         {
             var nameSplit = RunnerAction.Name.Split('-');
-            var runnerRuntime = runnerRuntimes.FirstOrDefault(i => i.RunnerEntity.Id == nameSplit[2]);
-            if (runnerRuntime == null)
+            if (!runnerRuntimes.TryGetValue(RunnerId, out var runnerRuntime))
             {
-                await Execute(httpClient, HttpMethod.Delete, RunnerEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken);
+                var deleteResult = await Execute(httpClient, HttpMethod.Delete, RunnerEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken);
+                deleteResult.ThrowIfError();
                 _logger.LogInformation("Runner purged (dangling): {name}", RunnerAction.Name);
             }
             else
@@ -183,16 +212,15 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         _logger.LogDebug("Fetching runner containers...");
 
         List<DockerContainer> allDockerContainers = [];
-        DockerContainer? cacheContainer = null;
         allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Linux));
         allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Windows));
+        DockerContainer? cacheContainer = null;
         foreach (var container in allDockerContainers)
         {
             if (container.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
                 container.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName))
             {
-                var runnerRuntime = runnerRuntimes.FirstOrDefault(i => i.RunnerEntity.Id == containerRunnerId);
-                if (runnerRuntime != null)
+                if (runnerRuntimes.TryGetValue(containerRunnerId, out var runnerRuntime))
                 {
                     if (runnerRuntime.Runners.TryGetValue(container.Name, out var runner))
                     {
@@ -225,41 +253,34 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         if (cacheContainer == null)
         {
-            string key = $"managed_runner-{runnerControllerId}-cache_container";
-            RevExecute(key, async () =>
+            try
             {
-                try
-                {
-                    RunnerOSType runnerOS = RunnerOSType.Linux;
-                    string name = $"{key}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                    string image = "ghcr.io/falcondev-oss/github-actions-cache-server:latest";
-                    string runnerId = $"managed_runner-{runnerControllerId}";
-                    string dockerArgs = "";
-                    dockerArgs += $" -l \"cicd.self_runner_cache_for={runnerControllerId}\"";
-                    dockerArgs += $" -e \"URL_ACCESS_TOKEN=awdawd\"";
-                    dockerArgs += $" -e \"API_BASE_URL=http://localhost:3000\"";
-                    dockerArgs += $" -v \"cache-data-{runnerControllerId}:/app/.data\"";
-                    dockerArgs += $" -p \"3000:3000\"";
-                    dockerArgs += " --add-host host.docker.internal=host-gateway";
-                    await dockerService.Build(runnerOS, image, runnerId);
-                    await dockerService.Run(runnerOS, name, image, runnerId, 2, 4, null, dockerArgs);
-                    _logger.LogInformation("Runner cache container created (up): {id}", name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogInformation("Runner cache container init error: {ex}", ex.Message);
-                }
-            }, () =>
+                RunnerOSType runnerOS = RunnerOSType.Linux;
+                string name = $"managed_runner-{runnerControllerId}-cache_container-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                string image = "ghcr.io/falcondev-oss/github-actions-cache-server:latest";
+                string runnerId = $"managed_runner-{runnerControllerId}";
+                string dockerArgs = "";
+                dockerArgs += $" -l \"cicd.self_runner_cache_for={runnerControllerId}\"";
+                dockerArgs += $" -e \"URL_ACCESS_TOKEN=awdawd\"";
+                dockerArgs += $" -e \"API_BASE_URL=http://localhost:3000\"";
+                dockerArgs += $" -v \"cache-data-{runnerControllerId}:/app/.data\"";
+                dockerArgs += $" -p \"3000:3000\"";
+                dockerArgs += " --add-host host.docker.internal=host-gateway";
+                await dockerService.Build(runnerOS, image, runnerId);
+                await dockerService.Run(runnerOS, name, image, runnerId, 2, 4, null, dockerArgs);
+                _logger.LogInformation("Runner cache container created (up): {id}", name);
+            }
+            catch (Exception ex)
             {
-                _logger.LogInformation("Runner cache container init (pending): {rev}", key);
-            });
+                _logger.LogInformation("Runner cache container init error: {ex}", ex.Message);
+            }
         }
 
         _logger.LogDebug("Runner containers: {x}", string.Join(", ", allDockerContainers.Select(i => i.Name)));
 
         _logger.LogDebug("Checking for deleted runners...");
 
-        foreach (var runnerRuntime in runnerRuntimes.ToArray())
+        foreach (var runnerRuntime in runnerRuntimes.Values.ToArray())
         {
             if (runnerRuntime.RunnerEntity.Deleted)
             {
@@ -267,7 +288,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     if (runner.RunnerAction != null)
                     {
-                        await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                        deleteResult.ThrowIfError();
                         _logger.LogInformation("Runner purged (deleted): {name}", runner.Name);
                     }
                     if (runner.DockerContainer != null)
@@ -276,8 +298,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         _logger.LogInformation("Runner purged (deleted): {name}", runner.Name);
                     }
                 }
-                runnerRuntimes.Remove(runnerRuntime);
                 await runnerService.Delete(runnerRuntime.RunnerEntity.Id, true, stoppingToken);
+                runnerRuntimes.Remove(runnerRuntime.Id);
             }
             else
             {
@@ -286,7 +308,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     if (runner.DockerContainer == null && runner.RunnerAction != null)
                     {
-                        await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                        deleteResult.ThrowIfError();
                         runnerRuntime.Runners.Remove(runner.Name);
                         _logger.LogInformation("Runner purged (deleted): {name}", runner.Name);
                     }
@@ -295,7 +318,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         if (!runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
                             containerRunnerRev != runnerRuntime.Rev)
                         {
-                            await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                            var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                            deleteResult.ThrowIfError();
                             await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
                             runnerRuntime.Runners.Remove(runner.Name);
                             _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
@@ -307,7 +331,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         _logger.LogDebug("Checking for runner status");
 
-        foreach (var runnerRuntime in runnerRuntimes.ToArray())
+        foreach (var runnerRuntime in runnerRuntimes.Values.ToArray())
         {
             foreach (var runner in runnerRuntime.Runners.Values.ToArray())
             {
@@ -330,148 +354,189 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
-        _logger.LogDebug("Checking for runners to upscale");
+        _logger.LogDebug("Checking for dangling images");
 
-        var oldRunnerRuntimes = await runnerRuntimeHolder.Get() ?? [];
-
-        foreach (var runnerRuntime in runnerRuntimes)
+        List<(DockerImage DockerImage, RunnerOSType RunnerOS)> allDockerImages = [];
+        allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Linux)).Select(i => (i, RunnerOSType.Linux)));
+        allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Windows)).Select(i => (i, RunnerOSType.Windows)));
+        foreach (var (image, runnerOS) in allDockerImages)
         {
-            var oldRunnerRuntime = oldRunnerRuntimes.FirstOrDefault(i => i.RunnerEntity.Id == runnerRuntime.RunnerEntity.Id);
-            if (oldRunnerRuntime != null)
+            string[] repoSplit = image.Repository.Split('-');
+            if (repoSplit.Length >= 3 && repoSplit[0] == "managed_runner" && repoSplit[1] == runnerControllerId)
             {
-                foreach (var oldRunner in oldRunnerRuntime.Runners.Values)
+                string containerRunnerId = repoSplit[2];
+                string tag = image.Tag;
+                if (!runnerRuntimes.TryGetValue(containerRunnerId, out var runnerRuntime))
                 {
-                    if (oldRunner.Status == RunnerStatus.Building &&
-                        !runnerRuntime.Runners.ContainsKey(oldRunner.Name))
-                    {
-                        runnerRuntime.Runners[oldRunner.Name] = oldRunner;
-                    }
+                    var imageToDelete = $"{image.Repository}:{tag}";
+                    await dockerService.DeleteImages(runnerOS, imageToDelete);
+                    _logger.LogInformation("Runner image purged (outdated): {name}", imageToDelete);
                 }
-            }
-            if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
-            {
-                string key = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}-{runnerRuntime.RunnerEntity.Rev.ToLowerInvariant()}";
-                RevExecute(key, async () =>
-                {
-                    var runners = runnerRuntime.Runners.ToArray();
-                    for (int i = 0; i < (runnerRuntime.RunnerEntity.Count - runners.Length); i++)
-                    {
-                        string name = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}-{runnerRuntime.RunnerEntity.Rev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                        try
-                        {
-                            runnerRuntime.Runners[name] = new RunnerInstance()
-                            {
-                                Name = name,
-                                DockerContainer = null,
-                                RunnerAction = null,
-                                Status = RunnerStatus.Building
-                            };
-                            string inputArgs = $"--name {name} --url {GetConfigUrl(runnerRuntime.RunnerEntity)} --ephemeral --unattended";
-                            var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerRuntime.RunnerEntity, "actions/runners/registration-token", stoppingToken);
-                            inputArgs += $" --token {tokenResponse["token"]}";
-                            if (runnerRuntime.RunnerEntity.Labels.Length != 0)
-                            {
-                                inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
-                            }
-                            if (!string.IsNullOrEmpty(runnerRuntime.RunnerEntity.Group))
-                            {
-                                inputArgs += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
-                            }
-                            _logger.LogInformation("Runner preparing: {id}", name);
-                            RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
-                            string image = runnerRuntime.RunnerEntity.Image;
-                            string runnerId = runnerRuntime.RunnerEntity.Id;
-                            int cpus = runnerRuntime.RunnerEntity.Cpus;
-                            int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
-                            string input;
-                            string dockerArgs = "";
-                            if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
-                            {
-                                input = $"""
-                                    mkdir /actions-runner
-                                    cd /actions-runner
-                                    cp -r /host-assets/* ./
-                                    ./bootstrap.sh
-                                    ./config.sh {inputArgs}
-                                    ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" ./run.sh
-                                    """
-                                    .Replace("\n\r", " && ")
-                                    .Replace("\r\n", " && ")
-                                    .Replace("\n", " && ")
-                                    .Replace("\"", "\\\"");
-                                var wslPath = LinuxActionsRunnerDir.ToString().Replace("\\", "/").Replace(":", "");
-                                wslPath = wslPath[0].ToString().ToLowerInvariant() + wslPath[1..].ToString();
-                                wslPath = "/mnt/" + wslPath;
-                                dockerArgs += $" -v \"{wslPath}:/host-assets\"";
-                            }
-                            else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
-                            {
-                                input = $"""
-                                    $ErrorActionPreference='Stop' ; $ProgressPreference='Continue' ; $verbosePreference='Continue'
-                                    mkdir C:\actions-runner
-                                    cd C:\actions-runner                     
-                                    Copy-Item "C:\host-assets\*" -Destination "$PWD" -Recurse -Force
-                                    ./bootstrap.ps1
-                                    ./config.cmd {inputArgs}
-                                    $env:ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"; ./run.cmd
-                                    """
-                                    .Replace("\n\r", " ; ")
-                                    .Replace("\r\n", " ; ")
-                                    .Replace("\n", " ; ")
-                                    .Replace("\"", "\\\"");
-                                dockerArgs += $" -v \"{WindowsActionsRunnerDir}:C:\\host-assets\"";
-                            }
-                            else
-                            {
-                                throw new NotSupportedException();
-                            }
-                            dockerArgs += $" -l \"cicd.self_runner_id={runnerRuntime.RunnerEntity.Id}\"";
-                            dockerArgs += $" -l \"cicd.self_runner_rev={runnerRuntime.RunnerEntity.Rev}\"";
-                            dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
-                            dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
-                            dockerArgs += " --add-host host.docker.internal=host-gateway";
-                            await dockerService.Build(runnerOs, image, runnerId);
-                            try
-                            {
-                                await dockerService.DeleteContainer(runnerOs, name);
-                            }
-                            catch { }
-                            await dockerService.Run(runnerOs, name, image, runnerId, cpus, memoryGB, input, dockerArgs);
-                            _logger.LogInformation("Runner created (up): {id}", name);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogInformation("Runner rev init error: {ex}", ex.Message);
-                        }
-                        finally
-                        {
-                            runnerRuntime.Runners.Remove(name);
-                        }
-                    }
-                }, () =>
-                {
-                    _logger.LogInformation("Runner rev init (pending): {rev}", key);
-                });
             }
         }
 
-        await runnerRuntimeHolder.Set(() => [.. runnerRuntimes]);
+        _logger.LogDebug("Checking for runners to upscale");
+
+        foreach (var runnerRuntime in runnerRuntimes.Values)
+        {
+            if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
+            {
+                string? regToken = null;
+                try
+                {
+                    var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerRuntime.RunnerEntity, "actions/runners/registration-token", stoppingToken);
+                    tokenResponse.ThrowIfErrorOrHasNoValue();
+                    regToken = tokenResponse.Value["token"];
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation("Runner register token error: {ex}", ex.Message);
+                    continue;
+                }
+
+                var runners = runnerRuntime.Runners.ToArray();
+                var runnerRev = runnerRuntime.Rev;
+
+                for (int i = 0; i < (runnerRuntime.RunnerEntity.Count - runners.Length); i++)
+                {
+                    string name = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}-{runnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                    try
+                    {
+                        runnerRuntime.Runners[name] = new RunnerInstance()
+                        {
+                            Name = name,
+                            DockerContainer = null,
+                            RunnerAction = null,
+                            Status = RunnerStatus.Building
+                        };
+                        string inputArgs = $"--name {name} --url {GetConfigUrl(runnerRuntime.RunnerEntity)} --ephemeral --unattended";
+                        inputArgs += $" --token {regToken}";
+                        if (runnerRuntime.RunnerEntity.Labels.Length != 0)
+                        {
+                            inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
+                        }
+                        if (!string.IsNullOrEmpty(runnerRuntime.RunnerEntity.Group))
+                        {
+                            inputArgs += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
+                        }
+                        _logger.LogInformation("Runner preparing: {id}", name);
+                        RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
+                        string runnerOsStr = runnerOs switch
+                        {
+                            RunnerOSType.Linux => "linux",
+                            RunnerOSType.Windows => "windows",
+                            _ => throw new NotSupportedException()
+                        };
+                        string image = runnerRuntime.RunnerEntity.Image;
+                        string runnerId = runnerRuntime.RunnerEntity.Id;
+                        var baseImage = $"managed_runner-{runnerControllerId}-{runnerId}-base:latest";
+                        var actualImage = $"managed_runner-{runnerControllerId}-{runnerId}:latest";
+                        int cpus = runnerRuntime.RunnerEntity.Cpus;
+                        int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
+                        string input;
+                        string dockerArgs = "";
+                        string dockerfile = $"""
+                                FROM {baseImage}
+                                COPY ./HostAssets/{runnerOsStr} /runner
+
+                                """;
+                        if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                        {
+                            input = $"""
+                                cd /runner
+                                ./config.sh {inputArgs}
+                                ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" ./run.sh
+                                """
+                                .Replace("\n\r", " && ")
+                                .Replace("\r\n", " && ")
+                                .Replace("\n", " && ")
+                                .Replace("\"", "\\\"");
+                            dockerfile += """
+                                WORKDIR "/runner"
+                                SHELL ["/bin/bash", "-c"]
+                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
+                                RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
+                                RUN ./bin/installdependencies.sh
+                                """;
+                        }
+                        else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                        {
+                            input = $"""
+                                $ErrorActionPreference='Stop' ; $ProgressPreference='Continue' ; $verbosePreference='Continue'
+                                cd C:\runner
+                                ./config.cmd {inputArgs}
+                                $env:ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"; ./run.cmd
+                                """
+                                .Replace("\n\r", " ; ")
+                                .Replace("\r\n", " ; ")
+                                .Replace("\n", " ; ")
+                                .Replace("\"", "\\\"");
+                            dockerfile += """
+                                WORKDIR "C:\runner"
+                                SHELL ["powershell"]
+                                RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                                RUN (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
+                                """;
+                        }
+                        else
+                        {
+                            throw new NotSupportedException();
+                        }
+                        dockerArgs += $" -l \"cicd.self_runner_id={runnerRuntime.RunnerEntity.Id}\"";
+                        dockerArgs += $" -l \"cicd.self_runner_rev={runnerRev}\"";
+                        dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
+                        dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
+                        dockerArgs += " --add-host host.docker.internal=host-gateway";
+                        var actionsRunnerDockerfile = (ActionsRunnerDockerfilesDir / $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}");
+                        await actionsRunnerDockerfile.WriteAllTextAsync(dockerfile, stoppingToken);
+
+                        async void run()
+                        {
+                            try
+                            {
+                                await executorLocker.Execute(actualImage, async () =>
+                                {
+                                    await dockerService.Build(runnerOs, image, baseImage);
+                                    await dockerService.Build(runnerOs, actionsRunnerDockerfile, actualImage);
+                                    await dockerService.Run(runnerOs, name, actualImage, runnerId, cpus, memoryGB, input, dockerArgs);
+
+                                    _logger.LogInformation("Runner created (up): {id}", name);
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogInformation("Runner rev run error: {ex}", ex.Message);
+                                runnerRuntime.Runners.Remove(name);
+                            }
+                        }
+                        run();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogInformation("Runner rev init error: {ex}", ex.Message);
+                        runnerRuntime.Runners.Remove(name);
+                    }
+                }
+            }
+        }
+
+        await runnerRuntimeHolder.Set(() => [.. runnerRuntimes.Values]);
 
         _logger.LogDebug("Runner routine end");
     }
 
-    private static async Task Execute(HttpClient httpClient, HttpMethod httpMethod, RunnerEntity runnerEntity, string segement, CancellationToken cancellationToken)
+    private static async Task<HttpResult> Execute(HttpClient httpClient, HttpMethod httpMethod, RunnerEntity runnerEntity, string segement, CancellationToken cancellationToken)
     {
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerEntity.GithubToken);
-        (await httpClient.Execute(requestMessage, cancellationToken: cancellationToken)).ThrowIfError();
+        return await httpClient.Execute(requestMessage, cancellationToken: cancellationToken);
     }
 
-    private static async Task<T> Execute<T>(HttpClient httpClient, HttpMethod httpMethod, RunnerEntity runnerEntity, string segement, CancellationToken cancellationToken)
+    private static async Task<HttpResult<T>> Execute<T>(HttpClient httpClient, HttpMethod httpMethod, RunnerEntity runnerEntity, string segement, CancellationToken cancellationToken)
     {
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerEntity.GithubToken);
-        return (await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken)).GetValueOrThrow();
+        return await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken);
     }
 
     private static string GetEndpoint(RunnerEntity runnerEntity, string segement)
@@ -503,43 +568,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         else
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
-        }
-    }
-
-    private async void RevExecute(string key, Func<Task> exec, Action busy)
-    {
-        if (await busyRevsLocker.WaitAsync(10))
-        {
-            bool removeKey = false;
-            try
-            {
-                if (busyRevs.Contains(key))
-                {
-                    busy();
-                }
-                else
-                {
-                    busyRevs.Add(key);
-                    removeKey = true;
-                    await exec();
-                }
-            }
-            catch
-            {
-                throw;
-            }
-            finally
-            {
-                if (removeKey)
-                {
-                    busyRevs.Remove(key);
-                }
-                busyRevsLocker.Release();
-            }
-        }
-        else
-        {
-            busy();
         }
     }
 }

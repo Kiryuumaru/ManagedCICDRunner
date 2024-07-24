@@ -19,13 +19,13 @@ public class RunnerAddDto
 
     public required int MemoryGB { get; init; }
 
-    public required string? Group { get; init; }
+    public string? Group { get; init; }
 
     public required string[] Labels { get; init; }
 
     public required string GithubToken { get; init; }
 
-    public required string? GithubRepo { get; init; }
+    public string? GithubRepo { get; init; }
 
-    public required string? GithubOrg { get; init; }
+    public string? GithubOrg { get; init; }
 }

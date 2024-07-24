@@ -363,5 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 
 /src/Presentation/dat.dat
-/src/Presentation/Mount/linux/actions-runner-linux-*
-/src/Presentation/Mount/windows/actions-runner-win-*
+/src/Presentation/HostAssets/linux/actions-runner-linux-*
+/src/Presentation/HostAssets/windows/actions-runner-win-*
+/src/Presentation/Dockerfiles/.ActionsRunner

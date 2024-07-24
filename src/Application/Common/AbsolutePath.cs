@@ -168,11 +168,19 @@ public class AbsolutePath
 
     public Task WriteAllTextAsync(string content, CancellationToken cancellationToken = default)
     {
+        if (!Parent.DirectoryExists())
+        {
+            Parent.CreateDirectory();
+        }
         return File.WriteAllTextAsync(Path, content, cancellationToken);
     }
 
     public async Task WriteObjAsync<T>(T obj, JsonSerializerOptions? jsonSerializerOptions = null, CancellationToken cancellationToken = default)
     {
+        if (!Parent.DirectoryExists())
+        {
+            Parent.CreateDirectory();
+        }
         await Task.Run(() => File.WriteAllTextAsync(Path, JsonSerializer.Serialize(obj, jsonSerializerOptions), cancellationToken), cancellationToken);
     }
 

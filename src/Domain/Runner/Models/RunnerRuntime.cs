@@ -16,5 +16,5 @@ public class RunnerRuntime
 
     public required RunnerEntity RunnerEntity { get; init; }
 
-    public Dictionary<string, RunnerInstance> Runners { get; set; } = [];
+    public Dictionary<string, RunnerInstance> Runners { get; init; } = [];
 }
