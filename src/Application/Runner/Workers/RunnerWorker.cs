@@ -103,6 +103,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     _logger.LogInformation("Downloading common asset {}...", url);
                     try
                     {
+                        actionRunnersPath.Parent.CreateDirectory();
                         if (actionRunnersPath.FileExists())
                         {
                             actionRunnersPath.DeleteFile();
