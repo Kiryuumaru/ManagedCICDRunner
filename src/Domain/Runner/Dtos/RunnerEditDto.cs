@@ -22,10 +22,4 @@ public class RunnerEditDto
     public string? NewGroup { get; init; }
 
     public string[]? NewLabels { get; init; }
-
-    public string? NewGithubToken { get; init; }
-
-    public string? NewGithubRepo { get; init; }
-
-    public string? NewGithubOrg { get; init; }
 }

@@ -135,8 +135,7 @@ class Build : BaseNukeBuildHelpers
                         throw new NotSupportedException();
                     }
 
-                    (RootDirectory / "dockers").CopyRecursively(outPath / "dockers");
-                    (RootDirectory / "Mount").CopyRecursively(outPath / "Mount");
+                    (RootDirectory / "Dockerfiles").CopyRecursively(outPath / "Dockerfiles");
 
                     if (context.TryGetVersionedContext(out var versioned))
                     {

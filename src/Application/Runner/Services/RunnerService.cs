@@ -20,11 +20,12 @@ using TransactionHelpers.Interface;
 
 namespace Application.Runner.Services;
 
-public class RunnerService(ILogger<RunnerService> logger, IServiceProvider serviceProvider, RunnerStoreService runnerStoreService) : IRunnerService
+public class RunnerService(ILogger<RunnerService> logger, IServiceProvider serviceProvider, RunnerStoreService runnerStoreService, RunnerTokenStoreService runnerTokenStoreService) : IRunnerService
 {
     private readonly ILogger<RunnerService> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly RunnerStoreService _runnerStoreService = runnerStoreService;
+    private readonly RunnerTokenStoreService _runnerTokenStoreService = runnerTokenStoreService;
 
     public async Task<HttpResult<RunnerEntity[]>> GetAll(CancellationToken cancellationToken = default)
     {
@@ -95,6 +96,13 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
     {
         HttpResult<RunnerEntity> result = new();
 
+        if (string.IsNullOrEmpty(runnerAddDto.TokenId))
+        {
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("RUNNER_TOKEN_ID_INVALID", "Runner token id is invalid");
+            return result;
+        }
+
         if (string.IsNullOrEmpty(runnerAddDto.Image))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
@@ -109,22 +117,25 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             return result;
         }
 
-        if (string.IsNullOrEmpty(runnerAddDto.GithubToken))
+        var runnerTokenStore = _runnerTokenStoreService.GetStore();
+
+        if (!result.Success(await runnerTokenStore.Get<RunnerTokenEntity>(runnerAddDto.TokenId.ToLowerInvariant(), cancellationToken: cancellationToken), out RunnerTokenEntity? runnerToken))
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("RUNNER_TOKEN_INVALID", "Runner token is invalid");
+            _logger.LogError("Error runner token Get: {}", result.Error);
+            result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
 
-        if (string.IsNullOrEmpty(runnerAddDto.GithubOrg) && string.IsNullOrEmpty(runnerAddDto.GithubRepo))
+        if (runnerToken == null)
         {
-            result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("RUNNER_ORG_REPO_INVALID", "Runner org or repo is invalid");
+            result.WithStatusCode(HttpStatusCode.NotFound);
+            result.WithError("RUNNER_TOKEN_ID_NOT_FOUND", "Runner token ID not found");
             return result;
         }
 
         RunnerEntity newRunner = new()
         {
+            TokenId = runnerAddDto.TokenId,
             Id = StringHelpers.Random(6, false).ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
@@ -134,10 +145,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Cpus = runnerAddDto.Cpus,
             MemoryGB = runnerAddDto.MemoryGB,
             Group = runnerAddDto.Group,
-            Labels = runnerAddDto.Labels,
-            GithubToken = runnerAddDto.GithubToken,
-            GithubOrg = runnerAddDto.GithubOrg,
-            GithubRepo = runnerAddDto.GithubRepo,
+            Labels = runnerAddDto.Labels
         };
 
         var store = _runnerStoreService.GetStore();
@@ -151,6 +159,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         result.WithValue(newRunner);
         result.WithStatusCode(HttpStatusCode.OK);
+
+        _logger.LogInformation("Runner id {} was created", newRunner.Id);
 
         return result;
     }
@@ -182,10 +192,9 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             return result;
         }
 
-        RunnerEntity newRunner;
-
-        newRunner = new()
+        RunnerEntity newRunner = new()
         {
+            TokenId = runner.TokenId,
             Id = runner.Id.ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
@@ -195,10 +204,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Group = !string.IsNullOrEmpty(runnerEditDto.NewGroup) ? runnerEditDto.NewGroup : runner.Group,
             Labels = runnerEditDto.NewLabels ?? runner.Labels,
             Cpus = runnerEditDto.NewCpus ?? runner.Cpus,
-            MemoryGB = runnerEditDto.NewMemoryGB ?? runner.MemoryGB,
-            GithubToken = !string.IsNullOrEmpty(runnerEditDto.NewGithubToken) ? runnerEditDto.NewGithubToken : runner.GithubToken,
-            GithubOrg = !string.IsNullOrEmpty(runnerEditDto.NewGithubOrg) ? runnerEditDto.NewGithubOrg : runner.GithubOrg,
-            GithubRepo = !string.IsNullOrEmpty(runnerEditDto.NewGithubRepo) ? runnerEditDto.NewGithubRepo : runner.GithubRepo
+            MemoryGB = runnerEditDto.NewMemoryGB ?? runner.MemoryGB
         };
 
         if (!result.Success(await store.Set(id.ToLowerInvariant(), newRunner, cancellationToken: cancellationToken)))
@@ -249,6 +255,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
             newRunner = new()
             {
+                TokenId = runner.TokenId,
                 Id = runner.Id,
                 Rev = runner.Rev,
                 Deleted = true,
@@ -258,10 +265,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
                 Group = runner.Group,
                 Labels = runner.Labels,
                 Cpus = runner.Cpus,
-                MemoryGB = runner.MemoryGB,
-                GithubToken = runner.GithubToken,
-                GithubOrg = runner.GithubOrg,
-                GithubRepo = runner.GithubRepo
+                MemoryGB = runner.MemoryGB
             };
 
             if (!result.Success(await store.Set(id.ToLowerInvariant(), newRunner, cancellationToken: cancellationToken)))
@@ -322,7 +326,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (runnerRuntimes != null)
         {
-            result.WithValue(runnerRuntimes.FirstOrDefault(i => i.Id.Equals(id, StringComparison.InvariantCultureIgnoreCase)));
+            result.WithValue(runnerRuntimes.FirstOrDefault(i => i.RunnerId.Equals(id, StringComparison.InvariantCultureIgnoreCase)));
         }
 
         result.WithStatusCode(HttpStatusCode.OK);

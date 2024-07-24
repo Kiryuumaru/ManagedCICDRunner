@@ -10,9 +10,13 @@ namespace Domain.Runner.Models;
 
 public class RunnerRuntime
 {
-    public required string Id { get; init; }
+    public required string TokenId { get; init; }
 
-    public required string Rev { get; init; }
+    public required string TokenRev { get; init; }
+
+    public required string RunnerId { get; init; }
+
+    public required string RunnerRev { get; init; }
 
     public required RunnerEntity RunnerEntity { get; init; }
 

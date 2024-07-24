@@ -9,6 +9,8 @@ namespace Domain.Runner.Dtos;
 
 public class RunnerAddDto
 {
+    public required string TokenId { get; init; }
+
     public required string Image { get; init; }
 
     public required RunnerOSType RunnerOS { get; init; }
@@ -22,10 +24,4 @@ public class RunnerAddDto
     public string? Group { get; init; }
 
     public required string[] Labels { get; init; }
-
-    public required string GithubToken { get; init; }
-
-    public string? GithubRepo { get; init; }
-
-    public string? GithubOrg { get; init; }
 }

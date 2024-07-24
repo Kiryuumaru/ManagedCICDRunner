@@ -9,6 +9,8 @@ namespace Domain.Runner.Entities;
 
 public class RunnerEntity
 {
+    public required string TokenId { get; init; }
+
     public required string Id { get; init; }
 
     public required string Rev { get; init; }
@@ -28,10 +30,4 @@ public class RunnerEntity
     public required string? Group { get; init; }
 
     public required string[] Labels { get; init; }
-
-    public required string GithubToken { get; init; }
-
-    public required string? GithubRepo { get; init; }
-
-    public required string? GithubOrg { get; init; }
 }

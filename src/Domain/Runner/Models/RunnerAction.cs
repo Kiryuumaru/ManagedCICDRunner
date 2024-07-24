@@ -12,6 +12,8 @@ public class RunnerAction
 {
     public required string Name { get; init; }
 
+    public required string RunnerId { get; init; }
+
     public required string Id { get; init; }
 
     public required bool Busy { get; init; }
