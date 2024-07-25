@@ -27,9 +27,9 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
     private readonly RunnerStoreService _runnerStoreService = runnerStoreService;
     private readonly RunnerTokenStoreService _runnerTokenStoreService = runnerTokenStoreService;
 
-    public async Task<HttpResult<RunnerEntity[]>> GetAll(CancellationToken cancellationToken = default)
+    public async Task<HttpResult<Dictionary<string, RunnerEntity>>> GetAll(CancellationToken cancellationToken = default)
     {
-        HttpResult<RunnerEntity[]> result = new();
+        HttpResult<Dictionary<string, RunnerEntity>> result = new();
 
         var store = _runnerStoreService.GetStore();
 
@@ -53,7 +53,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             runnerEntities.Add(runner);
         }
 
-        result.WithValue(runnerEntities.ToArray());
+        result.WithValue(runnerEntities.ToDictionary(i => i.Id));
         result.WithStatusCode(HttpStatusCode.OK);
 
         return result;
@@ -298,12 +298,12 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
         return result;
     }
 
-    public async Task<HttpResult<RunnerRuntime[]>> GetAllRuntime(CancellationToken cancellationToken = default)
+    public async Task<HttpResult<Dictionary<string, RunnerRuntime>>> GetAllRuntime(CancellationToken cancellationToken = default)
     {
-        HttpResult<RunnerRuntime[]> result = new();
+        HttpResult<Dictionary<string, RunnerRuntime>> result = new();
 
         using var scope = _serviceProvider.CreateScope();
-        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<RunnerRuntime[]>();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
         var runnerRuntimes = await runnerRuntimeHolder.Get();
 
         if (runnerRuntimes != null)

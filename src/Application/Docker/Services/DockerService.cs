@@ -22,6 +22,16 @@ public class DockerService(ILogger<DockerService> logger)
 {
     private readonly ILogger<DockerService> _logger = logger;
 
+    public async Task<DockerContainer[]> GetContainers()
+    {
+        List<DockerContainer> dockerContainers = [];
+
+        dockerContainers.AddRange(await GetContainers(RunnerOSType.Linux));
+        dockerContainers.AddRange(await GetContainers(RunnerOSType.Windows));
+
+        return [.. dockerContainers];
+    }
+
     public async Task<DockerContainer[]> GetContainers(RunnerOSType runnerOS)
     {
         List<DockerContainer> dockerContainers = [];
@@ -118,6 +128,16 @@ public class DockerService(ILogger<DockerService> logger)
             }
             catch { }
         }
+    }
+
+    public async Task<DockerImage[]> GetImages()
+    {
+        List<DockerImage> dockerImages = [];
+
+        dockerImages.AddRange(await GetImages(RunnerOSType.Linux));
+        dockerImages.AddRange(await GetImages(RunnerOSType.Windows));
+
+        return [.. dockerImages];
     }
 
     public async Task<DockerImage[]> GetImages(RunnerOSType runnerOS)

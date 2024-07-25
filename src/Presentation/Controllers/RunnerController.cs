@@ -67,7 +67,7 @@ public class RunnerController(RunnerService runnerService) : ControllerBase
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("api/runner")]
-    public Task<HttpResult<RunnerEntity[]>> GetAll()
+    public Task<HttpResult<Dictionary<string, RunnerEntity>>> GetAll()
     {
         return _runnerService.GetAll();
     }

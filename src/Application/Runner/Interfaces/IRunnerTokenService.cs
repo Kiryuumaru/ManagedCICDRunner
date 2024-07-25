@@ -21,7 +21,7 @@ namespace Application.Runner.Interfaces;
 
 public interface IRunnerTokenService
 {
-    Task<HttpResult<RunnerTokenEntity[]>> GetAll(CancellationToken cancellationToken = default);
+    Task<HttpResult<Dictionary<string, RunnerTokenEntity>>> GetAll(CancellationToken cancellationToken = default);
 
     Task<HttpResult<RunnerTokenEntity>> Get(string id, CancellationToken cancellationToken = default);
 

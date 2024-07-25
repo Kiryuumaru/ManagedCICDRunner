@@ -21,7 +21,7 @@ namespace Application.Runner.Interfaces;
 
 public interface IRunnerService
 {
-    Task<HttpResult<RunnerEntity[]>> GetAll(CancellationToken cancellationToken = default);
+    Task<HttpResult<Dictionary<string, RunnerEntity>>> GetAll(CancellationToken cancellationToken = default);
 
     Task<HttpResult<RunnerEntity>> Get(string id, CancellationToken cancellationToken = default);
 
@@ -31,7 +31,7 @@ public interface IRunnerService
 
     Task<HttpResult<RunnerEntity>> Delete(string id, bool hardDelete, CancellationToken cancellationToken = default);
 
-    Task<HttpResult<RunnerRuntime[]>> GetAllRuntime(CancellationToken cancellationToken = default);
+    Task<HttpResult<Dictionary<string, RunnerRuntime>>> GetAllRuntime(CancellationToken cancellationToken = default);
 
     Task<HttpResult<RunnerRuntime>> GetRuntime(string id, CancellationToken cancellationToken = default);
 }

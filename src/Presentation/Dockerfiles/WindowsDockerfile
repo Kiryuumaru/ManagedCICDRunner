@@ -2,5 +2,19 @@ FROM mcr.microsoft.com/windows:20H2
 SHELL ["powershell"]
 
 RUN Set-ExecutionPolicy Unrestricted
+
+# Install .NET
+ENV DOTNET_VERSION=8.0.300
+RUN $ErrorActionPreference = 'Stop'; \
+    $ProgressPreference = 'SilentlyContinue'; \
+    Invoke-WebRequest -OutFile dotnet.zip https://dotnetcli.azureedge.net/dotnet/Sdk/$env:DOTNET_VERSION/dotnet-sdk-$env:DOTNET_VERSION-win-x64.zip; \
+    $dotnet_sha512 = 'c287cbd4084d381f715029be2878c2d9a326b47140d3636b1356c01ce28d887550d9629ca4bdb4029d2985955c48a22334bba8e628218e13ec0ae7d0a2c3407b'; \
+    if ((Get-FileHash dotnet.zip -Algorithm sha512).Hash -ne $dotnet_sha512) { \
+        Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
+        exit 1; \
+    }; \
+    Expand-Archive dotnet.zip -DestinationPath dotnet; \
+    Remove-Item -Force dotnet.zip
+
 RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\vs_community.exe" -UseBasicParsing
 RUN & "$env:TEMP\vs_community.exe" --add Microsoft.VisualStudio.Workload.VCTools --quiet --wait --norestart --noUpdateInstaller | Out-Default

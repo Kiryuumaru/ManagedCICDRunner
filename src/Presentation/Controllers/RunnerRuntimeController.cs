@@ -22,7 +22,7 @@ public class RunnerRuntimeController(RunnerService runnerService) : ControllerBa
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("api/runner-runtime")]
-    public Task<HttpResult<RunnerRuntime[]>> GetAll()
+    public Task<HttpResult<Dictionary<string, RunnerRuntime>>> GetAll()
     {
         return _runnerService.GetAllRuntime();
     }

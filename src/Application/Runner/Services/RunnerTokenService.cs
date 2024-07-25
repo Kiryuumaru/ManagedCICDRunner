@@ -26,9 +26,9 @@ public class RunnerTokenService(ILogger<RunnerTokenService> logger, IServiceProv
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly RunnerTokenStoreService _runnerTokenStoreService = runnerTokenStoreService;
 
-    public async Task<HttpResult<RunnerTokenEntity[]>> GetAll(CancellationToken cancellationToken = default)
+    public async Task<HttpResult<Dictionary<string, RunnerTokenEntity>>> GetAll(CancellationToken cancellationToken = default)
     {
-        HttpResult<RunnerTokenEntity[]> result = new();
+        HttpResult<Dictionary<string, RunnerTokenEntity>> result = new();
 
         var store = _runnerTokenStoreService.GetStore();
 
@@ -52,7 +52,7 @@ public class RunnerTokenService(ILogger<RunnerTokenService> logger, IServiceProv
             runnerTokenEntities.Add(runnerToken);
         }
 
-        result.WithValue(runnerTokenEntities.ToArray());
+        result.WithValue(runnerTokenEntities.ToDictionary(i => i.Id));
         result.WithStatusCode(HttpStatusCode.OK);
 
         return result;

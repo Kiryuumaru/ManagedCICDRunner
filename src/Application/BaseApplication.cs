@@ -25,6 +25,6 @@ public class BaseApplication : ApplicationDependency
         services.AddScoped<RunnerStoreService>();
         services.AddScoped<RunnerTokenStoreService>();
         services.AddHostedService<RunnerWorker>();
-        services.AddSingletonObjectHolder<RunnerRuntime[]>();
+        services.AddSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
     }
 }

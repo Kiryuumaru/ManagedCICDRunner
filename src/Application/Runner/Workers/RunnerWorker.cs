@@ -28,7 +28,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using System.Xml.Linq;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace Application.Runner.Workers;
 
@@ -61,7 +60,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     private readonly ExecutorLocker executorLocker = new();
 
-    private readonly Dictionary<string, RunnerRuntime> runnerRuntimes = [];
+    private readonly Dictionary<string, RunnerRuntime> runnerRuntimeMap = [];
+
+    private readonly ConcurrentDictionary<string, RunnerInstance> building = [];
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -76,10 +77,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
         var dockerService = scope.ServiceProvider.GetRequiredService<DockerService>();
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
-        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<RunnerRuntime[]>();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
 
         _logger.LogDebug("Runner routine start...");
-
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
         if (string.IsNullOrEmpty(runnerControllerId))
         {
@@ -92,7 +92,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
 
-        _logger.LogDebug("Checking common assets...");
+        _logger.LogDebug("Fetching common assets...");
         List<Task> commonAssetsTasks = [];
         foreach (var (os, url, hash, actionRunnersPath) in HostAssetMatrix)
         {
@@ -123,10 +123,19 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
         await Task.WhenAll(commonAssetsTasks);
 
-        _logger.LogDebug("Fetching runner token entities...");
+        _logger.LogDebug("Fetching runner token entities from service...");
+        var runnerTokenEntityMap = (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow();
 
-        Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokens = [];
-        foreach (var runnerToken in (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow())
+        _logger.LogDebug("Fetching runner entities from service...");
+        var runnerEntityMap = (await runnerService.GetAll(stoppingToken)).GetValueOrThrow();
+
+        _logger.LogDebug("Fetching docker containers from service...");
+        var dockerContainers = await dockerService.GetContainers();
+
+        _logger.LogDebug("Fetching runner token actions from API...");
+        Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokenMap = [];
+        Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionMap = [];
+        foreach (var runnerToken in runnerTokenEntityMap.Values)
         {
             var runnerListResult = await Execute<JsonDocument>(httpClient, HttpMethod.Get, runnerToken, "actions/runners", stoppingToken);
             if (runnerListResult.IsError)
@@ -148,153 +157,27 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         string id = runnerJson.GetProperty("id").GetInt32().ToString();
                         bool busy = runnerJson.GetProperty("busy").GetBoolean();
                         var runnerId = nameSplit[2];
-                        if (!runnerActions.Any(i => i.Name == name))
+                        var runnerAction = new RunnerAction()
                         {
-                            runnerActions.Add(new RunnerAction()
-                            {
-                                Id = id,
-                                RunnerId = runnerId,
-                                Name = name,
-                                Busy = busy
-                            });
-                        }
-                    }
-                }
-            }
-            runnerTokens[runnerToken.Id] = (runnerToken, runnerActions);
-        }
-
-        _logger.LogDebug("Fetching runner entities...");
-
-        foreach (var runnerEntity in (await runnerService.GetAll(stoppingToken)).GetValueOrThrow())
-        {
-            string tokenRev = "";
-            if (runnerTokens.TryGetValue(runnerEntity.TokenId, out var runnerToken) && !runnerToken.RunnerTokenEntity.Deleted)
-            {
-                tokenRev = runnerToken.RunnerTokenEntity.Rev;
-            }
-            RunnerRuntime runnerRuntime;
-            if (runnerRuntimes.TryGetValue(runnerEntity.Id, out var existingRunnerRuntime))
-            {
-                runnerRuntime = new RunnerRuntime()
-                {
-                    TokenId = runnerEntity.TokenId,
-                    TokenRev = tokenRev,
-                    RunnerId = runnerEntity.Id,
-                    RunnerRev = runnerEntity.Rev,
-                    RunnerEntity = runnerEntity,
-                    Runners = existingRunnerRuntime.Runners
-                };
-            }
-            else
-            {
-                runnerRuntime = new RunnerRuntime()
-                {
-                    TokenId = runnerEntity.TokenId,
-                    TokenRev = tokenRev,
-                    RunnerId = runnerEntity.Id,
-                    RunnerRev = runnerEntity.Rev,
-                    RunnerEntity = runnerEntity
-                };
-            }
-            runnerRuntimes[runnerRuntime.RunnerId] = runnerRuntime;
-        }
-
-        _logger.LogDebug("Runner entities: {x}", string.Join(", ", runnerRuntimes.Select(i => i.Value.RunnerId)));
-
-        _logger.LogDebug("Fetching runner actions...");
-
-        List<(string RunnerId, RunnerEntity RunnerEntity, RunnerAction RunnerAction)> allRunnerActions = [];
-        foreach (var runnerRuntime in runnerRuntimes.Values)
-        {
-            if (!runnerTokens.TryGetValue(runnerRuntime.TokenId, out var runnerToken))
-            {
-                continue;
-            }
-            foreach (var runnerTokenAction in runnerToken.RunnerActions)
-            {
-                if (!allRunnerActions.Any(i => i.RunnerAction.Name == runnerTokenAction.Name))
-                {
-                    allRunnerActions.Add((runnerTokenAction.RunnerId, runnerRuntime.RunnerEntity, runnerTokenAction));
-                }
-            }
-        }
-
-        _logger.LogDebug("Runner actions: {x}", string.Join(", ", allRunnerActions.Select(i => i.RunnerAction.Name)));
-
-        _logger.LogDebug("Checking for dangling actions...");
-
-        foreach (var (RunnerId, RunnerEntity, RunnerAction) in allRunnerActions.ToArray())
-        {
-            if (!runnerTokens.TryGetValue(RunnerEntity.TokenId, out var runnerToken))
-            {
-                continue;
-            }
-            var nameSplit = RunnerAction.Name.Split('-');
-            if (!runnerRuntimes.TryGetValue(RunnerId, out var runnerRuntime))
-            {
-                var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerToken.RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken);
-                deleteResult.ThrowIfError();
-                _logger.LogInformation("Runner purged (dangling): {name}", RunnerAction.Name);
-            }
-            else
-            {
-                runnerRuntime.Runners[RunnerAction.Name] = new RunnerInstance()
-                {
-                    Name = RunnerAction.Name,
-                    RunnerAction = RunnerAction,
-                    DockerContainer = null,
-                    Status = RunnerStatus.Building
-                };
-            }
-        }
-
-        _logger.LogDebug("Fetching runner containers...");
-
-        List<DockerContainer> allDockerContainers = [];
-        allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Linux));
-        allDockerContainers.AddRange(await dockerService.GetContainers(RunnerOSType.Windows));
-        DockerContainer? cacheContainer = null;
-        foreach (var container in allDockerContainers)
-        {
-            if (container.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
-                container.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName))
-            {
-                if (runnerRuntimes.TryGetValue(containerRunnerId, out var runnerRuntime))
-                {
-                    if (runnerRuntime.Runners.TryGetValue(container.Name, out var runner))
-                    {
-                        runner = new RunnerInstance()
-                        {
-                            Name = containerRunnerName,
-                            RunnerAction = runner.RunnerAction,
-                            DockerContainer = container,
-                            Status = RunnerStatus.Building
+                            Id = id,
+                            RunnerId = runnerId,
+                            Name = name,
+                            Busy = busy
                         };
+                        runnerActions.Add(runnerAction);
+                        runnerActionMap[name] = (runnerAction, runnerToken);
                     }
-                    else
-                    {
-                        runner = new RunnerInstance()
-                        {
-                            Name = containerRunnerName,
-                            RunnerAction = null,
-                            DockerContainer = container,
-                            Status = RunnerStatus.Starting
-                        };
-                    }
-                    runnerRuntime.Runners[containerRunnerName] = runner;
                 }
             }
-            else if (container.Labels.TryGetValue("cicd.self_runner_cache_for", out _))
-            {
-                cacheContainer = container;
-            }
+            runnerTokenMap[runnerToken.Id] = (runnerToken, runnerActions);
         }
 
-        if (cacheContainer == null)
+        _logger.LogDebug("Checking cache server...");
+        if (!dockerContainers.Any(i => i.Labels.TryGetValue("cicd.self_runner_cache_for", out _)))
         {
             try
             {
+                _logger.LogInformation("Cache server not found. Adding cache server...");
                 RunnerOSType runnerOS = RunnerOSType.Linux;
                 string name = $"managed_runner-{runnerControllerId}-cache_container-{StringHelpers.Random(6, false).ToLowerInvariant()}";
                 string image = "ghcr.io/falcondev-oss/github-actions-cache-server:latest";
@@ -308,7 +191,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 dockerArgs += " --add-host host.docker.internal=host-gateway";
                 await dockerService.Build(runnerOS, image, runnerId);
                 await dockerService.Run(runnerOS, name, image, runnerId, 2, 4, null, dockerArgs);
-                _logger.LogInformation("Runner cache container created (up): {id}", name);
+                _logger.LogInformation("Cache server created: {id}", name);
             }
             catch (Exception ex)
             {
@@ -316,99 +199,284 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
-        _logger.LogDebug("Runner containers: {x}", string.Join(", ", allDockerContainers.Select(i => i.Name)));
-
-        _logger.LogDebug("Checking for deleted runners...");
-
-        foreach (var runnerRuntime in runnerRuntimes.Values.ToArray())
+        _logger.LogDebug("Updating runner entities to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
-            if (!runnerTokens.TryGetValue(runnerRuntime.TokenId, out var runnerToken))
+            if (runnerEntityMap.TryGetValue(runnerRuntime.RunnerId, out var runnerEntity))
+            {
+                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
+                {
+                    TokenId = runnerRuntime.TokenId,
+                    TokenRev = runnerRuntime.TokenRev,
+                    RunnerId = runnerEntity.Id,
+                    RunnerRev = runnerRuntime.RunnerRev,
+                    RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
+                    RunnerEntity = runnerEntity,
+                    Runners = runnerRuntime.Runners,
+                };
+            }
+        }
+
+        _logger.LogDebug("Updating runner token entities to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
+        {
+            if (runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
+            {
+                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
+                {
+                    TokenId = runnerTokenEntity.Id,
+                    TokenRev = runnerRuntime.TokenRev,
+                    RunnerId = runnerRuntime.RunnerId,
+                    RunnerRev = runnerRuntime.RunnerRev,
+                    RunnerTokenEntity = runnerTokenEntity,
+                    RunnerEntity = runnerRuntime.RunnerEntity,
+                    Runners = runnerRuntime.Runners,
+                };
+            }
+        }
+
+        _logger.LogDebug("Updating docker containers to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                var dockerContainer = dockerContainers.FirstOrDefault(i =>
+                    i.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
+                    i.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName) &&
+                    containerRunnerId == runnerRuntime.RunnerId &&
+                    containerRunnerName == runner.Name);
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    DockerContainer = dockerContainer,
+                    RunnerAction = runner.RunnerAction,
+                    Status = runner.Status,
+                };
+            }
+        }
+
+        _logger.LogDebug("Updating action runners to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(runner.Name);
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    DockerContainer = runner.DockerContainer,
+                    RunnerAction = RunnerAction,
+                    Status = runner.Status,
+                };
+            }
+        }
+
+        _logger.LogDebug("Adding runner entities and runner token entities to runtime runners...");
+        foreach (var runnerEntity in runnerEntityMap.Values)
+        {
+            if (runnerRuntimeMap.ContainsKey(runnerEntity.Id))
             {
                 continue;
             }
-            if (runnerRuntime.RunnerEntity.Deleted || runnerToken.RunnerTokenEntity.Deleted)
+            if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
             {
-                foreach (var runner in runnerRuntime.Runners.Values)
+                continue;
+            }
+            runnerRuntimeMap[runnerEntity.Id] = new()
+            {
+                TokenId = runnerTokenEntity.Id,
+                TokenRev = runnerTokenEntity.Rev,
+                RunnerId = runnerEntity.Id,
+                RunnerRev = runnerEntity.Rev,
+                RunnerTokenEntity = runnerTokenEntity,
+                RunnerEntity = runnerEntity,
+                Runners = [],
+            };
+        }
+
+        _logger.LogDebug("Adding docker containers to runtime runners...");
+        foreach (var dockerContainer in dockerContainers)
+        {
+            if (dockerContainer.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
+                dockerContainer.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName))
+            {
+                if (!runnerRuntimeMap.TryGetValue(containerRunnerId, out var runnerRuntime))
+                {
+                    continue;
+                }
+                if (runnerRuntime.Runners.ContainsKey(containerRunnerName))
+                {
+                    continue;
+                }
+                var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(containerRunnerName);
+                runnerRuntime.Runners[containerRunnerName] = new()
+                {
+                    Name = containerRunnerName,
+                    DockerContainer = dockerContainer,
+                    RunnerAction = RunnerAction,
+                    Status = RunnerStatus.Building,
+                };
+            }
+        }
+
+        _logger.LogDebug("Adding action runners to runtime runners...");
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        {
+            if (!runnerRuntimeMap.TryGetValue(RunnerAction.RunnerId, out var runnerRuntime))
+            {
+                continue;
+            }
+            if (runnerRuntime.Runners.ContainsKey(RunnerAction.Name))
+            {
+                continue;
+            }
+            var dockerContainer = dockerContainers.FirstOrDefault(i =>
+                i.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
+                i.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName) &&
+                containerRunnerId == runnerRuntime.RunnerId &&
+                containerRunnerName == RunnerAction.Name);
+            runnerRuntime.Runners[RunnerAction.Name] = new()
+            {
+                Name = RunnerAction.Name,
+                DockerContainer = dockerContainer,
+                RunnerAction = RunnerAction,
+                Status = RunnerStatus.Building,
+            };
+        }
+
+        _logger.LogDebug("Updating runtime runner instance status...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                RunnerStatus runnerStatus = RunnerStatus.Building;
+                if (runner.DockerContainer != null && runner.RunnerAction != null)
+                {
+                    runnerStatus = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                }
+                else if (runner.DockerContainer != null && runner.RunnerAction == null)
+                {
+                    runnerStatus = RunnerStatus.Starting;
+                }
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    DockerContainer = runner.DockerContainer,
+                    RunnerAction = runner.RunnerAction,
+                    Status = runnerStatus
+                };
+            }
+        }
+
+        _logger.LogDebug("Removing deleted runner tokens...");
+        foreach (var runnerTokenEntity in runnerTokenEntityMap.Values)
+        {
+            if (!runnerTokenEntity.Deleted)
+            {
+                continue;
+            }
+            foreach (var runnerRuntime in runnerRuntimeMap.Values.Where(i => i.TokenId == runnerTokenEntity.Id))
+            {
+                (await runnerService.Delete(runnerRuntime.RunnerEntity.Id, false, stoppingToken)).ThrowIfError();
+                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
                     if (runner.RunnerAction != null)
                     {
-                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerToken.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
                         deleteResult.ThrowIfError();
                     }
                     if (runner.DockerContainer != null)
                     {
                         await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
                     }
-                    _logger.LogInformation("Runner purged (deleted): {name}", runner.Name);
+                    runnerRuntime.Runners.Remove(runner.Name);
+                    _logger.LogInformation("Runner purged (token deleted): {name}", runner.Name);
                 }
-                (await runnerService.Delete(runnerRuntime.RunnerEntity.Id, true, stoppingToken)).ThrowIfError();
-                runnerRuntimes.Remove(runnerRuntime.RunnerId);
+                (await runnerService.Delete(runnerRuntime.RunnerId, true, stoppingToken)).ThrowIfError();
+                runnerRuntimeMap.Remove(runnerRuntime.RunnerId);
+                _logger.LogInformation("Runner instance purged (token deleted): {name}", runnerRuntime.RunnerId);
             }
-            else
-            {
-                List<(string Name, string Id, bool Busy)> runners = [];
-                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
-                {
-                    if (runner.DockerContainer == null && runner.RunnerAction != null)
-                    {
-                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerToken.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                        deleteResult.ThrowIfError();
-                        runnerRuntime.Runners.Remove(runner.Name);
-                        _logger.LogInformation("Runner purged (deleted): {name}", runner.Name);
-                    }
-                    else if (runner.DockerContainer != null && runner.RunnerAction != null)
-                    {
-                        if (!runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_rev", out var containerRunnerRev) ||
-                            !runner.DockerContainer.Labels.TryGetValue("cicd.self_runner_token_rev", out var containerRunnerTokenRev) ||
-                            containerRunnerRev != runnerRuntime.RunnerRev ||
-                            containerRunnerTokenRev != runnerRuntime.TokenRev)
-                        {
-                            var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerToken.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                            deleteResult.ThrowIfError();
-                            await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
-                            runnerRuntime.Runners.Remove(runner.Name);
-                            _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
-                        }
-                    }
-                }
-            }
+            (await runnerTokenService.Delete(runnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
+            _logger.LogInformation("Runner token purged (token deleted): {name}", runnerTokenEntity.Id);
         }
 
-        foreach (var (RunnerTokenEntity, RunnerActions) in runnerTokens.Values.ToArray())
+        _logger.LogDebug("Removing deleted runners...");
+        foreach (var runnerEntity in runnerEntityMap.Values)
         {
-            if (RunnerTokenEntity.Deleted)
+            if (!runnerEntity.Deleted)
             {
-                (await runnerTokenService.Delete(RunnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
+                continue;
             }
-        }
-
-        _logger.LogDebug("Checking for runner status");
-
-        foreach (var runnerRuntime in runnerRuntimes.Values.ToArray())
-        {
+            if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
+            {
+                continue;
+            }
+            if (!runnerRuntimeMap.TryGetValue(runnerEntity.Id, out var runnerRuntime))
+            {
+                continue;
+            }
             foreach (var runner in runnerRuntime.Runners.Values.ToArray())
             {
-                RunnerStatus status = RunnerStatus.Building;
-                if (runner.DockerContainer != null && runner.RunnerAction != null)
+                if (runner.DockerContainer != null)
                 {
-                    status = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
                 }
-                else if (runner.DockerContainer != null)
+                if (runner.RunnerAction != null)
                 {
-                    status = RunnerStatus.Starting;
+                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                    deleteResult.ThrowIfError();
                 }
-                runnerRuntime.Runners[runner.Name] = new RunnerInstance()
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
+            }
+            (await runnerService.Delete(runnerEntity.Id, true, stoppingToken)).ThrowIfError();
+            runnerRuntimeMap.Remove(runnerEntity.Id);
+            _logger.LogInformation("Runner instance purged (runner deleted): {name}", runnerEntity.Id);
+        }
+
+        _logger.LogDebug("Removing dangling runner actions...");
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        {
+            bool delete = false;
+            foreach (var runnerRuntime in runnerRuntimeMap.Values)
+            {
+                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
-                    Name = runner.Name,
-                    RunnerAction = runner.RunnerAction,
-                    DockerContainer = runner.DockerContainer,
-                    Status = status
-                };
+                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null)
+                    {
+                        runnerRuntime.Runners.Remove(runner.Name);
+                        delete = true;
+                        break;
+                    }
+                }
+                if (delete)
+                {
+                    break;
+                }
+            }
+            if (delete)
+            {
+                (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                _logger.LogInformation("Runner action purged (dangling): {name}", RunnerAction.Name);
+            }
+        }
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                if (runner.DockerContainer == null && runner.RunnerAction != null)
+                {
+                    if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
+                    {
+                        continue;
+                    }
+                    (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    _logger.LogInformation("Runner action purged (dangling): {name}", runner.RunnerAction.Name);
+                }
             }
         }
 
-        _logger.LogDebug("Checking for dangling images");
-
+        _logger.LogDebug("Removing dangling images...");
         List<(DockerImage DockerImage, RunnerOSType RunnerOS)> allDockerImages = [];
         allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Linux)).Select(i => (i, RunnerOSType.Linux)));
         allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Windows)).Select(i => (i, RunnerOSType.Windows)));
@@ -419,7 +487,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 string containerRunnerId = repoSplit[2];
                 string tag = image.Tag;
-                if (!runnerRuntimes.TryGetValue(containerRunnerId, out var runnerRuntime))
+                if (!runnerRuntimeMap.TryGetValue(containerRunnerId, out var runnerRuntime))
                 {
                     var imageToDelete = $"{image.Repository}:{tag}";
                     await dockerService.DeleteImages(runnerOS, imageToDelete);
@@ -428,11 +496,80 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
-        _logger.LogDebug("Checking for runners to upscale");
-
-        foreach (var runnerRuntime in runnerRuntimes.Values)
+        _logger.LogDebug("Removing dangling runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
         {
-            if (!runnerTokens.TryGetValue(runnerRuntime.TokenId, out var runnerToken))
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                if (runner.Status == RunnerStatus.Building && !building.ContainsKey(runner.Name))
+                {
+                    runnerRuntime.Runners.Remove(runner.Name);
+                }
+            }
+        }
+
+        _logger.LogDebug("Removing outdated runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
+        {
+            if (runnerRuntime.TokenRev == runnerRuntime.RunnerTokenEntity.Rev &&
+                runnerRuntime.RunnerRev == runnerRuntime.RunnerEntity.Rev)
+            {
+                continue;
+            }
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                if (runner.DockerContainer != null)
+                {
+                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
+                }
+                if (runner.RunnerAction != null)
+                {
+                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                    deleteResult.ThrowIfError();
+                }
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
+            }
+            runnerRuntimeMap[runnerRuntime.RunnerId] = new()
+            {
+                TokenId = runnerRuntime.TokenId,
+                TokenRev = runnerRuntime.RunnerTokenEntity.Rev,
+                RunnerId = runnerRuntime.RunnerId,
+                RunnerRev = runnerRuntime.RunnerEntity.Rev,
+                RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
+                RunnerEntity = runnerRuntime.RunnerEntity,
+                Runners = runnerRuntime.Runners,
+            };
+        }
+
+        _logger.LogDebug("Removing excess runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
+        {
+            while (runnerRuntime.RunnerEntity.Count < runnerRuntime.Runners.Count)
+            {
+                var runner = runnerRuntime.Runners.Values.FirstOrDefault();
+                if (runner == null)
+                {
+                    break;
+                }
+                if (runner.DockerContainer != null)
+                {
+                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
+                }
+                if (runner.RunnerAction != null)
+                {
+                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
+                    deleteResult.ThrowIfError();
+                }
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
+            }
+        }
+
+        _logger.LogDebug("Checking for runners to upscale...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerToken))
             {
                 continue;
             }
@@ -441,7 +578,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 string? regToken = null;
                 try
                 {
-                    var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken.RunnerTokenEntity, "actions/runners/registration-token", stoppingToken);
+                    var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
                     tokenResponse.ThrowIfErrorOrHasNoValue();
                     regToken = tokenResponse.Value["token"];
                 }
@@ -467,7 +604,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             RunnerAction = null,
                             Status = RunnerStatus.Building
                         };
-                        string inputArgs = $"--name {name} --url {GetConfigUrl(runnerToken.RunnerTokenEntity)} --ephemeral --unattended";
+                        string inputArgs = $"--name {name} --url {GetConfigUrl(runnerToken)} --ephemeral --unattended";
                         inputArgs += $" --token {regToken}";
                         if (runnerRuntime.RunnerEntity.Labels.Length != 0)
                         {
@@ -553,6 +690,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             try
                             {
+                                building[name] = runnerRuntime.Runners[name];
                                 await executorLocker.Execute(actualImage, async () =>
                                 {
                                     await dockerService.Build(runnerOs, image, baseImage);
@@ -567,6 +705,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 _logger.LogInformation("Runner rev run error: {ex}", ex.Message);
                                 runnerRuntime.Runners.Remove(name);
                             }
+                            finally
+                            {
+                                building.Remove(name, out _);
+                            }
                         }
                         run();
                     }
@@ -579,7 +721,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
-        await runnerRuntimeHolder.Set(() => [.. runnerRuntimes.Values]);
+        await runnerRuntimeHolder.Set(() => new(runnerRuntimeMap));
 
         _logger.LogDebug("Runner routine end");
     }

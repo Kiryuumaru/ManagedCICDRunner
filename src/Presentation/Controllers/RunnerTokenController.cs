@@ -67,7 +67,7 @@ public class RunnerTokenController(RunnerTokenService runnerTokenService) : Cont
     /// <response code="200">Returns when the operation is successful.</response>
     /// <response code="500">Returns when an unexpected error occurs.</response>
     [HttpGet("api/runner-token")]
-    public Task<HttpResult<RunnerTokenEntity[]>> GetAll()
+    public Task<HttpResult<Dictionary<string, RunnerTokenEntity>>> GetAll()
     {
         return _runnerTokenService.GetAll();
     }
