@@ -20,7 +20,7 @@ if (Test-Path $appZipPath) {
     Remove-Item -Path $appZipPath -Force
 }
 
-$appUri = "https://github.com/$repo/releases/download/$tag/$appZipName"
+$appUri = "https://github.com/$repo/releases/latest/download/$appZipName"
 Invoke-WebRequest -Uri $appUri -OutFile $appZipPath
 
 Expand-Archive -LiteralPath $appZipPath -DestinationPath $tempPath -Force
