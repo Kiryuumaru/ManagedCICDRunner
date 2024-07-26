@@ -79,6 +79,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
         var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
 
+
         _logger.LogDebug("Runner routine start...");
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
         if (string.IsNullOrEmpty(runnerControllerId))
@@ -177,6 +178,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             try
             {
+                IPAddress hostAddress = Dns.GetHostAddresses("host.docker.internal")[0];
                 _logger.LogInformation("Cache server not found. Adding cache server...");
                 RunnerOSType runnerOS = RunnerOSType.Linux;
                 string name = $"managed_runner-{runnerControllerId}-cache_container-{StringHelpers.Random(6, false).ToLowerInvariant()}";
@@ -184,9 +186,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 string runnerId = $"managed_runner-{runnerControllerId}";
                 string dockerArgs = "";
                 dockerArgs += $" -l \"cicd.self_runner_cache_for={runnerControllerId}\"";
-                dockerArgs += $" -e \"URL_ACCESS_TOKEN=awdawd\"";
-                dockerArgs += $" -e \"API_BASE_URL=http://localhost:3000\"";
-                dockerArgs += $" -v \"cache-data-{runnerControllerId}:/app/.data\"";
+                dockerArgs += $" -e \"URL_ACCESS_TOKEN={runnerControllerId}\"";
+                dockerArgs += $" -e \"API_BASE_URL=http://{hostAddress}:3000\"";
+                dockerArgs += $" -v \"cache-server-data:/app/.data\"";
                 dockerArgs += $" -p \"3000:3000\"";
                 dockerArgs += " --add-host host.docker.internal=host-gateway";
                 await dockerService.Build(runnerOS, image, runnerId);
@@ -579,7 +581,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             while (runnerRuntime.RunnerEntity.Count < runnerRuntime.Runners.Count)
             {
-                var runner = runnerRuntime.Runners.Values.FirstOrDefault();
+                var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready) ??
+                    runnerRuntime.Runners.Values.FirstOrDefault();
                 if (runner == null)
                 {
                     break;
@@ -613,6 +616,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
             if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
             {
+                IPAddress hostAddress = Dns.GetHostAddresses("host.docker.internal")[0];
                 string? regToken = null;
                 try
                 {
@@ -669,60 +673,43 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         string input;
                         string dockerArgs = "";
                         string dockerfile = $"""
-                                FROM {baseImage}
-                                COPY ./HostAssets/{runnerOsStr} /runner
+                            FROM {baseImage}
+                            COPY ./HostAssets/{runnerOsStr} /runner
 
-                                """;
+                            """;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
-                            dockerfile += """
+                            dockerfile += $"""
                                 WORKDIR "/runner"
                                 SHELL ["/bin/bash", "-c"]
-                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" 
+                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
                                 RUN tar xzf ./actions-runner-linux-x64.tar.gz
                                 RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
                                 RUN ./bin/installdependencies.sh
                                 """;
-                            //dockerfile += """
-                            //    WORKDIR "/runner"
-                            //    SHELL ["/bin/bash", "-c"]
-                            //    RUN tar xzf ./actions-runner-linux-x64.tar.gz
-                            //    RUN ./bin/installdependencies.sh
-                            //    """;
-                            input = $"""
+                            input = NormalizeDockerInput($"""
+                                echo '{hostAddress} host.docker.internal' | sudo tee -a /etc/hosts
                                 cd /runner
                                 ./config.sh {inputArgs}
                                 ./run.sh
-                                """
-                                .Replace("\n\r", " && ")
-                                .Replace("\r\n", " && ")
-                                .Replace("\n", " && ")
-                                .Replace("\"", "\\\"");
+                                """, runnerRuntime.RunnerEntity.RunnerOS);
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
-                            //dockerfile += """
-                            //    WORKDIR "C:\runner"
-                            //    SHELL ["powershell"]
-                            //    ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"
-                            //    RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                            //    RUN (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
-                            //    """;
-                            dockerfile += """
+                            dockerfile += $"""
                                 WORKDIR "C:\runner"
                                 SHELL ["powershell"]
+                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
                                 RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                                RUN [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
                                 """;
-                            input = $"""
+                            input = NormalizeDockerInput($"""
                                 $ErrorActionPreference='Stop' ; $verbosePreference='Continue'
+                                Add-Content -Path $env:windir\System32\drivers\etc\hosts -Value "`n{hostAddress}`thost.docker.internal" -Force
                                 cd C:\runner
                                 ./config.cmd {inputArgs}
-                                $env:ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"; ./run.cmd
-                                """
-                                .Replace("\n\r", " ; ")
-                                .Replace("\r\n", " ; ")
-                                .Replace("\n", " ; ")
-                                .Replace("\"", "\\\"");
+                                ./run.cmd
+                                """, runnerRuntime.RunnerEntity.RunnerOS);
                         }
                         else
                         {
@@ -733,8 +720,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         dockerArgs += $" -l \"cicd.self_runner_token_rev={runnerTokenRev}\"";
                         dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
                         dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
-                        //dockerArgs += " --net=\"host\"";
-                        dockerArgs += " --add-host host.docker.internal=host-gateway";
                         var actionsRunnerDockerfile = (ActionsRunnerDockerfilesDir / $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}");
                         await actionsRunnerDockerfile.WriteAllTextAsync(dockerfile, stoppingToken);
 
@@ -790,6 +775,28 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerTokenEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerTokenEntity.GithubToken);
         return await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken);
+    }
+
+    private static string NormalizeDockerInput(string input, RunnerOSType runnerOS)
+    {
+        if (runnerOS == RunnerOSType.Linux)
+        {
+            return input.Replace("\n\r", " && ")
+                .Replace("\r\n", " && ")
+                .Replace("\n", " && ")
+                .Replace("\"", "\\\"");
+        }
+        else if (runnerOS == RunnerOSType.Windows)
+        {
+            return input.Replace("\n\r", " ; ")
+                .Replace("\r\n", " ; ")
+                .Replace("\n", " ; ")
+                .Replace("\"", "\\\"");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
     }
 
     private static string GetEndpoint(RunnerTokenEntity runnerTokenEntity, string segement)
