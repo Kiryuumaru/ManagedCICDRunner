@@ -122,6 +122,9 @@ class Build : BaseNukeBuildHelpers
                         })
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
+
+                    (RootDirectory / "Dockerfiles").CopyRecursively(outPath / "Dockerfiles");
+
                     if (os == "linux")
                     {
                         archivePath.TarGZipTo(outAsset);
@@ -134,8 +137,6 @@ class Build : BaseNukeBuildHelpers
                     {
                         throw new NotSupportedException();
                     }
-
-                    (RootDirectory / "Dockerfiles").CopyRecursively(outPath / "Dockerfiles");
 
                     if (context.TryGetVersionedContext(out var versioned))
                     {
