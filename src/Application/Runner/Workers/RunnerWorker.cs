@@ -637,6 +637,19 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 """;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
+                            //dockerfile += """
+                            //    WORKDIR "/runner"
+                            //    SHELL ["/bin/bash", "-c"]
+                            //    RUN tar xzf ./actions-runner-linux-x64.tar.gz
+                            //    RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
+                            //    RUN ./bin/installdependencies.sh
+                            //    """;
+                            dockerfile += """
+                                WORKDIR "/runner"
+                                SHELL ["/bin/bash", "-c"]
+                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
+                                RUN ./bin/installdependencies.sh
+                                """;
                             input = $"""
                                 cd /runner
                                 ./config.sh {inputArgs}
@@ -646,18 +659,22 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 .Replace("\r\n", " && ")
                                 .Replace("\n", " && ")
                                 .Replace("\"", "\\\"");
-                            dockerfile += """
-                                WORKDIR "/runner"
-                                SHELL ["/bin/bash", "-c"]
-                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
-                                RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
-                                RUN ./bin/installdependencies.sh
-                                """;
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
+                            //dockerfile += """
+                            //    WORKDIR "C:\runner"
+                            //    SHELL ["powershell"]
+                            //    RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                            //    RUN (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
+                            //    """;
+                            dockerfile += """
+                                WORKDIR "C:\runner"
+                                SHELL ["powershell"]
+                                RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                                """;
                             input = $"""
-                                $ErrorActionPreference='Stop' ; $ProgressPreference='Continue' ; $verbosePreference='Continue'
+                                $ErrorActionPreference='Stop' ; $verbosePreference='Continue'
                                 cd C:\runner
                                 ./config.cmd {inputArgs}
                                 $env:ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"; ./run.cmd
@@ -666,12 +683,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 .Replace("\r\n", " ; ")
                                 .Replace("\n", " ; ")
                                 .Replace("\"", "\\\"");
-                            dockerfile += """
-                                WORKDIR "C:\runner"
-                                SHELL ["powershell"]
-                                RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                                RUN (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
-                                """;
                         }
                         else
                         {
