@@ -1,7 +1,17 @@
-FROM mcr.microsoft.com/windows:20H2
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
 SHELL ["powershell"]
 
 RUN Set-ExecutionPolicy Unrestricted
+
+RUN Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip' -OutFile MinGit.zip; \
+    $git_sha256 = '7ed2a3ce5bbbf8eea976488de5416894ca3e6a0347cee195a7d768ac146d5290'; \
+    if ((Get-FileHash MinGit.zip -Algorithm sha256).Hash -ne $git_sha256) { \
+        Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
+        exit 1; \
+    }; \
+    Expand-Archive c:\MinGit.zip -DestinationPath c:\MinGit; \
+    $env:PATH = $env:PATH + ';C:\MinGit\cmd\;C:\MinGit\cmd'; \
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\' -Name Path -Value $env:PATH
 
 # Install .NET
 ENV DOTNET_VERSION=8.0.300

@@ -28,6 +28,7 @@ jobs:
       run: chmod +x ./build.sh && ./build.sh PipelinePreSetup
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 10
     outputs:
       NUKE_PRE_SETUP: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP }}
       NUKE_PRE_SETUP_OUTPUT_TEST_MATRIX: ${{ steps.NUKE_RUN.outputs.NUKE_PRE_SETUP_OUTPUT_TEST_MATRIX }}
@@ -222,6 +223,7 @@ jobs:
     - BUILD_WINDOWS_X64
     - BUILD_WINDOWS_ARM64
     if: success() || failure() || always()
+    timeout-minutes: 10
     env:
       NUKE_PRE_SETUP: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP }}
       NUKE_RUN_RESULT_GITHUB_BUILD_LINUX_X64: ${{ needs.BUILD_LINUX_X64.result }}

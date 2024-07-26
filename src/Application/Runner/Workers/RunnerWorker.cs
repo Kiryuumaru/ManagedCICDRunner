@@ -382,8 +382,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     if (runner.RunnerAction != null)
                     {
-                        var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                        deleteResult.ThrowIfError();
+                        try
+                        {
+                            (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                        }
                     }
                     if (runner.DockerContainer != null)
                     {
@@ -423,8 +429,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 }
                 if (runner.RunnerAction != null)
                 {
-                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                    deleteResult.ThrowIfError();
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
                 }
                 runnerRuntime.Runners.Remove(runner.Name);
                 _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
@@ -456,7 +468,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
             if (delete)
             {
-                (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                try
+                {
+                    (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
+                }
                 _logger.LogInformation("Runner action purged (dangling): {name}", RunnerAction.Name);
             }
         }
@@ -470,7 +489,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     {
                         continue;
                     }
-                    (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
                     _logger.LogInformation("Runner action purged (dangling): {name}", runner.RunnerAction.Name);
                 }
             }
@@ -524,8 +550,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 }
                 if (runner.RunnerAction != null)
                 {
-                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                    deleteResult.ThrowIfError();
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
                 }
                 runnerRuntime.Runners.Remove(runner.Name);
                 _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
@@ -558,8 +590,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 }
                 if (runner.RunnerAction != null)
                 {
-                    var deleteResult = await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken);
-                    deleteResult.ThrowIfError();
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
                 }
                 runnerRuntime.Runners.Remove(runner.Name);
                 _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
@@ -637,23 +675,24 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 """;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
+                            dockerfile += """
+                                WORKDIR "/runner"
+                                SHELL ["/bin/bash", "-c"]
+                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" 
+                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
+                                RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
+                                RUN ./bin/installdependencies.sh
+                                """;
                             //dockerfile += """
                             //    WORKDIR "/runner"
                             //    SHELL ["/bin/bash", "-c"]
                             //    RUN tar xzf ./actions-runner-linux-x64.tar.gz
-                            //    RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
                             //    RUN ./bin/installdependencies.sh
                             //    """;
-                            dockerfile += """
-                                WORKDIR "/runner"
-                                SHELL ["/bin/bash", "-c"]
-                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
-                                RUN ./bin/installdependencies.sh
-                                """;
                             input = $"""
                                 cd /runner
                                 ./config.sh {inputArgs}
-                                ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/" ./run.sh
+                                ./run.sh
                                 """
                                 .Replace("\n\r", " && ")
                                 .Replace("\r\n", " && ")
@@ -665,6 +704,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             //dockerfile += """
                             //    WORKDIR "C:\runner"
                             //    SHELL ["powershell"]
+                            //    ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/awdawd/"
                             //    RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
                             //    RUN (gc ./bin/Runner.Worker.dll) -replace ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x55,0x00,0x52,0x00,0x4C,0x00))), ([Text.Encoding]::ASCII.GetString([byte[]] (0x41,0x00,0x43,0x00,0x54,0x00,0x49,0x00,0x4F,0x00,0x4E,0x00,0x53,0x00,0x5F,0x00,0x43,0x00,0x41,0x00,0x43,0x00,0x48,0x00,0x45,0x00,0x5F,0x00,0x4F,0x00,0x52,0x00,0x4C,0x00))) | Set-Content ./bin/Runner.Worker.dll
                             //    """;
@@ -693,6 +733,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         dockerArgs += $" -l \"cicd.self_runner_token_rev={runnerTokenRev}\"";
                         dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
                         dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
+                        //dockerArgs += " --net=\"host\"";
                         dockerArgs += " --add-host host.docker.internal=host-gateway";
                         var actionsRunnerDockerfile = (ActionsRunnerDockerfilesDir / $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}");
                         await actionsRunnerDockerfile.WriteAllTextAsync(dockerfile, stoppingToken);
