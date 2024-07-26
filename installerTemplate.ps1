@@ -1,4 +1,3 @@
-$tag = '{{$tag}}'
 $repo = '{{$repo}}'
 $appname = '{{$appname}}'
 $appexec = '{{$appexec}}'

@@ -140,14 +140,12 @@ class Build : BaseNukeBuildHelpers
                     if (context.TryGetVersionedContext(out var versioned))
                     {
                         (OutputDirectory / $"installer_{os}_{arch}.ps1").WriteAllText((RootDirectory / "installerTemplate.ps1").ReadAllText()
-                            .Replace("{{$tag}}", $"build.{versioned.AppVersion.BuildId}")
                             .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                             .Replace("{{$appname}}", $"ManagedCICDRunner_{os}_{arch}")
                             .Replace("{{$appexec}}", "Presentation.exe")
                             .Replace("{{$rootextract}}", $"ManagedCICDRunner_{os}_{arch}"));
 
                         (OutputDirectory / $"uninstaller_{os}_{arch}.ps1").WriteAllText((RootDirectory / "uninstallerTemplate.ps1").ReadAllText()
-                            .Replace("{{$tag}}", $"build.{versioned.AppVersion.BuildId}")
                             .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                             .Replace("{{$appname}}", $"ManagedCICDRunner_{os}_{arch}")
                             .Replace("{{$appexec}}", "Presentation.exe")
