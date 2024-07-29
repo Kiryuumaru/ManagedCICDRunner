@@ -3,28 +3,20 @@ SHELL ["powershell"]
 
 RUN Set-ExecutionPolicy Unrestricted
 
-RUN Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip' -OutFile MinGit.zip; \
-    $git_sha256 = '7ed2a3ce5bbbf8eea976488de5416894ca3e6a0347cee195a7d768ac146d5290'; \
-    if ((Get-FileHash MinGit.zip -Algorithm sha256).Hash -ne $git_sha256) { \
-        Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
-        exit 1; \
-    }; \
-    Expand-Archive c:\MinGit.zip -DestinationPath c:\MinGit; \
+ADD "https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip" ".\temp\MinGit.zip"
+RUN Expand-Archive "temp\MinGit.zip" -DestinationPath .\temp\MinGit; \
     $env:PATH = $env:PATH + ';C:\MinGit\cmd\;C:\MinGit\cmd'; \
     Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\' -Name Path -Value $env:PATH
-
-# Install .NET
-ENV DOTNET_VERSION=8.0.300
-RUN $ErrorActionPreference = 'Stop'; \
-    $ProgressPreference = 'SilentlyContinue'; \
-    Invoke-WebRequest -OutFile dotnet.zip https://dotnetcli.azureedge.net/dotnet/Sdk/$env:DOTNET_VERSION/dotnet-sdk-$env:DOTNET_VERSION-win-x64.zip; \
-    $dotnet_sha512 = 'c287cbd4084d381f715029be2878c2d9a326b47140d3636b1356c01ce28d887550d9629ca4bdb4029d2985955c48a22334bba8e628218e13ec0ae7d0a2c3407b'; \
-    if ((Get-FileHash dotnet.zip -Algorithm sha512).Hash -ne $dotnet_sha512) { \
-        Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
-        exit 1; \
-    }; \
-    Expand-Archive dotnet.zip -DestinationPath dotnet; \
-    Remove-Item -Force dotnet.zip
-
-RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\vs_community.exe" -UseBasicParsing
-RUN & "$env:TEMP\vs_community.exe" --add Microsoft.VisualStudio.Workload.VCTools --quiet --wait --norestart --noUpdateInstaller | Out-Default
+    
+ADD "https://aka.ms/vs/17/release/vs_community.exe" ".\temp\vs_community.exe"
+RUN & ".\temp\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller \
+    --add Microsoft.VisualStudio.Workload.Azure`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.ManagedDesktop`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.NativeCrossPlat`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.NativeDesktop`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.NetCrossPlat`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.NetWeb`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.Node`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.Python`;includeRecommended`;includeOptional \
+    --add Microsoft.VisualStudio.Workload.Python`;includeRecommended`;includeOptional \
+    | Out-Default
