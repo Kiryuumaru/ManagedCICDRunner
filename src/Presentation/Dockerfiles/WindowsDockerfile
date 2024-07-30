@@ -3,20 +3,29 @@ SHELL ["powershell"]
 
 RUN Set-ExecutionPolicy Unrestricted
 
-ADD "https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip" ".\temp\MinGit.zip"
-RUN Expand-Archive "temp\MinGit.zip" -DestinationPath .\temp\MinGit; \
+RUN Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip' -OutFile "$env:TEMP\MinGit.zip" -UseBasicParsing; \
+    $git_sha256 = '7ed2a3ce5bbbf8eea976488de5416894ca3e6a0347cee195a7d768ac146d5290'; \
+    if ((Get-FileHash "$env:TEMP\MinGit.zip" -Algorithm sha256).Hash -ne $git_sha256) { \
+        Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
+        exit 1; \
+    }; \
+    Expand-Archive "$env:TEMP\MinGit.zip" -DestinationPath .\temp\MinGit; \
     $env:PATH = $env:PATH + ';C:\MinGit\cmd\;C:\MinGit\cmd'; \
     Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\' -Name Path -Value $env:PATH
     
-ADD "https://aka.ms/vs/17/release/vs_community.exe" ".\temp\vs_community.exe"
-RUN & ".\temp\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller \
-    --add Microsoft.VisualStudio.Workload.Azure`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.ManagedDesktop`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.NativeCrossPlat`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.NativeDesktop`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.NetCrossPlat`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.NetWeb`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.Node`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.Python`;includeRecommended`;includeOptional \
-    --add Microsoft.VisualStudio.Workload.Python`;includeRecommended`;includeOptional \
+RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\vs_community.exe" -UseBasicParsing; \
+    & "$env:TEMP\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller --includeRecommended \
+    --add Microsoft.VisualStudio.Workload.Azure \
+    --add Microsoft.VisualStudio.Workload.Data \
+    --add Microsoft.VisualStudio.Workload.DataScience \
+    --add Microsoft.VisualStudio.Workload.ManagedDesktop \
+    --add Microsoft.VisualStudio.Workload.NativeCrossPlat \
+    --add Microsoft.VisualStudio.Workload.NativeDesktop \
+    --add Microsoft.VisualStudio.Workload.NativeMobile \
+    --add Microsoft.VisualStudio.Workload.NetCrossPlat \
+    --add Microsoft.VisualStudio.Workload.NetWeb \
+    --add Microsoft.VisualStudio.Workload.Node \
+    --add Microsoft.VisualStudio.Workload.Python \
+    --add Microsoft.VisualStudio.Workload.Universal \
+    --add Microsoft.VisualStudio.Workload.VisualStudioExtension \
     | Out-Default
