@@ -34,6 +34,7 @@ internal static class RoutineExecutor
             }
         }
     }
+
     public static void Execute(TimeSpan timingSpan, CancellationToken stoppingToken, Func<CancellationToken, Task> execute, Action<Exception> onError)
     {
         Execute(timingSpan, true, stoppingToken, execute, onError);

@@ -22,6 +22,41 @@ public class DockerService(ILogger<DockerService> logger)
 {
     private readonly ILogger<DockerService> _logger = logger;
 
+    public async Task<bool> IsDaemonAlive()
+    {
+        return
+            (await IsDaemonAlive(RunnerOSType.Windows)) &&
+            (await IsDaemonAlive(RunnerOSType.Linux));
+    }
+
+    public async Task<bool> IsDaemonAlive(RunnerOSType runnerOS)
+    {
+        string dockerCmd = GetDockerCommand(runnerOS);
+
+        bool isAlive = true;
+
+        await foreach (var commandEvent in Cli.RunListen($"{dockerCmd} info"))
+        {
+            switch (commandEvent)
+            {
+                case StandardOutputCommandEvent outEvent:
+                    _logger.LogTrace("{x}", outEvent.Text);
+                    break;
+                case StandardErrorCommandEvent errEvent:
+                    _logger.LogTrace("{x}", errEvent.Text);
+                    break;
+                case ExitedCommandEvent exitEvent:
+                    if (exitEvent.ExitCode != 0)
+                    {
+                        isAlive = false;
+                    }
+                    break;
+            }
+        }
+
+        return isAlive;
+    }
+
     public async Task<DockerContainer[]> GetContainers()
     {
         List<DockerContainer> dockerContainers = [];

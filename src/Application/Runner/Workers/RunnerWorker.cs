@@ -2,6 +2,7 @@
 using Application.Docker.Services;
 using Application.LocalStore.Services;
 using Application.Runner.Services;
+using CliWrap.EventStream;
 using Domain.Docker.Enums;
 using Domain.Docker.Models;
 using Domain.Runner.Dtos;
@@ -64,10 +65,34 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     private readonly ConcurrentDictionary<string, RunnerInstance> building = [];
 
+    private bool wslAlive = false;
+    private bool lastWslAlive = false;
+    private bool lastDockerAlive = false;
+
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), true, stoppingToken, WslKeepAlive, ex => _logger.LogError("WSL keep-alive error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
         return Task.CompletedTask;
+    }
+
+    private async Task WslKeepAlive(CancellationToken stoppingToken)
+    {
+        await foreach (var commandEvent in Cli.RunListen($"wsl while true; do sleep 2; done", stoppingToken: stoppingToken))
+        {
+            switch (commandEvent)
+            {
+                case StartedCommandEvent:
+                case StandardOutputCommandEvent:
+                    wslAlive = true;
+                    break;
+                case ExitedCommandEvent:
+                case StandardErrorCommandEvent:
+                    wslAlive = false;
+                    _logger.LogError("WSL keep-alive error: WSL exited.");
+                    break;
+            }
+        }
     }
 
     private async Task Routine(CancellationToken stoppingToken)
@@ -79,6 +104,29 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
         var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
 
+        if (!wslAlive)
+        {
+            lastWslAlive = false;
+            _logger.LogError("WSL is not alive");
+            return;
+        }
+        else if (!lastWslAlive)
+        {
+            _logger.LogInformation("WSL is alive");
+            lastWslAlive = true;
+        }
+
+        if (!await dockerService.IsDaemonAlive())
+        {
+            lastDockerAlive = false;
+            _logger.LogError("Docker daemon is not alive");
+            return;
+        }
+        else if (!lastDockerAlive)
+        {
+            _logger.LogInformation("Docker is alive");
+            lastDockerAlive = true;
+        }
 
         _logger.LogDebug("Runner routine start...");
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
