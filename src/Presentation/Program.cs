@@ -8,6 +8,12 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Application.Common;
 
+CancellationTokenSource cts = new();
+Console.CancelKeyPress += (s, e) =>
+{
+    cts.Cancel();
+};
+
 if (args.Any(i => i.Equals("--install-service", StringComparison.InvariantCultureIgnoreCase)))
 {
     await installAsService();
@@ -15,6 +21,21 @@ if (args.Any(i => i.Equals("--install-service", StringComparison.InvariantCultur
 else if (args.Any(i => i.Equals("--uninstall-service", StringComparison.InvariantCultureIgnoreCase)))
 {
     await uninstallAsService();
+}
+else if (args.Any(i => i.Equals("--logs-service", StringComparison.InvariantCultureIgnoreCase)))
+{
+    await foreach (var commandEvent in Cli.RunListen($"\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell\" -c \"Get-Content -Path \"svc.combined.log\" -Wait\"", stoppingToken: cts.Token))
+    {
+        switch (commandEvent)
+        {
+            case StandardOutputCommandEvent outEvent:
+                Console.WriteLine(outEvent.Text);
+                break;
+            case StandardErrorCommandEvent errEvent:
+                Console.WriteLine(errEvent.Text);
+                break;
+        }
+    }
 }
 else
 {
@@ -31,10 +52,10 @@ async Task installAsService()
     var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
     var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
-    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
-    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
-    await Cli.RunOnce($"{winswExecPath} install {serviceConfig}");
-    await Cli.RunOnce($"{winswExecPath} start {serviceConfig}");
+    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
+    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
+    await Cli.RunOnce($"{winswExecPath} install {serviceConfig}", stoppingToken: cts.Token);
+    await Cli.RunOnce($"{winswExecPath} start {serviceConfig}", stoppingToken: cts.Token);
 }
 
 async Task uninstallAsService()
@@ -44,8 +65,8 @@ async Task uninstallAsService()
     var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
     var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
-    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force");
-    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}");
+    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
+    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
 }
 
 async Task prepareSvc()
@@ -119,9 +140,9 @@ async Task downloadWinsw()
     Directory.CreateDirectory(winswZipExtractPath);
     {
         using var client = new HttpClient();
-        using var s = await client.GetStreamAsync(dlUrl);
+        using var s = await client.GetStreamAsync(dlUrl, cancellationToken: cts.Token);
         using var fs = new FileStream(winswZipPath, FileMode.OpenOrCreate);
-        await s.CopyToAsync(fs);
+        await s.CopyToAsync(fs, cancellationToken: cts.Token);
     }
     ZipFile.ExtractToDirectory(winswZipPath, winswZipExtractPath);
     File.Copy(winswDownloadedExecPath, winswExecPath);
