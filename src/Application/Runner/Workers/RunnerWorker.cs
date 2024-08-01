@@ -83,16 +83,18 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             switch (commandEvent)
             {
                 case StartedCommandEvent:
-                case StandardOutputCommandEvent:
                     wslAlive = true;
+                    break;
+                case StandardOutputCommandEvent outEvent:
+                    _logger.LogError("{out}", outEvent.Text);
                     break;
                 case ExitedCommandEvent:
                     wslAlive = false;
                     _logger.LogError("WSL keep-alive error: WSL exited.");
                     break;
-                case StandardErrorCommandEvent err:
+                case StandardErrorCommandEvent errEvent:
                     wslAlive = false;
-                    _logger.LogError("WSL keep-alive error: {err}", err);
+                    _logger.LogError("WSL keep-alive error: {err}", errEvent.Text);
                     break;
             }
         }
