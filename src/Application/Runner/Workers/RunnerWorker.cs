@@ -78,7 +78,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     private async Task WslKeepAlive(CancellationToken stoppingToken)
     {
-        await foreach (var commandEvent in Cli.RunListen($"wsl while true; do sleep 2; done", stoppingToken: stoppingToken))
+        await foreach (var commandEvent in Cli.RunListen("wsl", ["while true; do sleep 2; done"], stoppingToken: stoppingToken))
         {
             switch (commandEvent)
             {
@@ -87,9 +87,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     wslAlive = true;
                     break;
                 case ExitedCommandEvent:
-                case StandardErrorCommandEvent:
                     wslAlive = false;
                     _logger.LogError("WSL keep-alive error: WSL exited.");
+                    break;
+                case StandardErrorCommandEvent err:
+                    wslAlive = false;
+                    _logger.LogError("WSL keep-alive error: {err}", err);
                     break;
             }
         }
