@@ -82,7 +82,7 @@ jobs:
     - name: Cache Run
       uses: actions/cache@v4
       with:
-        path: ./.nuke/cache
+        path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_LINUX_X64_CACHE_KEY }}
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_LINUX_X64_CACHE_RESTORE_KEY }}
@@ -94,7 +94,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: managed-cicd-runner___BUILD_LINUX_X64
-        path: ./.nuke/output/*
+        path: ./.nuke/temp/artifacts/*
         if-no-files-found: error
         retention-days: 1
     needs:
@@ -114,7 +114,7 @@ jobs:
     - name: Cache Run
       uses: actions/cache@v4
       with:
-        path: ./.nuke/cache
+        path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_LINUX_ARM64_CACHE_KEY }}
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_LINUX_ARM64_CACHE_RESTORE_KEY }}
@@ -126,7 +126,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: managed-cicd-runner___BUILD_LINUX_ARM64
-        path: ./.nuke/output/*
+        path: ./.nuke/temp/artifacts/*
         if-no-files-found: error
         retention-days: 1
     needs:
@@ -146,7 +146,7 @@ jobs:
     - name: Cache Run
       uses: actions/cache@v4
       with:
-        path: ./.nuke/cache
+        path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_WINDOWS_X64_CACHE_KEY }}
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_WINDOWS_X64_CACHE_RESTORE_KEY }}
@@ -158,7 +158,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: managed-cicd-runner___BUILD_WINDOWS_X64
-        path: ./.nuke/output/*
+        path: ./.nuke/temp/artifacts/*
         if-no-files-found: error
         retention-days: 1
     needs:
@@ -178,7 +178,7 @@ jobs:
     - name: Cache Run
       uses: actions/cache@v4
       with:
-        path: ./.nuke/cache
+        path: ./.nuke/temp/cache
         key: ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_WINDOWS_ARM64_CACHE_KEY }}
         restore-keys: |-
           ${{ needs.PRE_SETUP.outputs.NUKE_PRE_SETUP_BUILD_WINDOWS_ARM64_CACHE_RESTORE_KEY }}
@@ -190,7 +190,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: managed-cicd-runner___BUILD_WINDOWS_ARM64
-        path: ./.nuke/output/*
+        path: ./.nuke/temp/artifacts/*
         if-no-files-found: error
         retention-days: 1
     needs:
@@ -211,7 +211,7 @@ jobs:
     - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        path: ./.nuke/temp/artifacts
+        path: ./.nuke/temp/artifacts-download
     - name: Run Nuke PipelinePostSetup
       run: chmod +x ./build.sh && ./build.sh PipelinePostSetup
       env:

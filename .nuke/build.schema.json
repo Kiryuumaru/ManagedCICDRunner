@@ -79,6 +79,7 @@
               "PipelinePreSetup",
               "PipelineRunEntry",
               "Publish",
+              "Run",
               "StatusWatch",
               "Test",
               "Version"
@@ -102,6 +103,7 @@
               "PipelinePreSetup",
               "PipelineRunEntry",
               "Publish",
+              "Run",
               "StatusWatch",
               "Test",
               "Version"

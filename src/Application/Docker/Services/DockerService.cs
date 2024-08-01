@@ -293,7 +293,7 @@ public class DockerService(ILogger<DockerService> logger)
             runCmd += $" -c \"{input}\"";
         }
 
-        await Cli.RunListenAndLog(_logger, runCmd, null);
+        await Cli.RunListenAndLog(_logger, runCmd);
     }
 
     private static string GetDockerCommand(RunnerOSType runnerOS)
