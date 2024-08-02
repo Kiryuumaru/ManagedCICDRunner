@@ -9,7 +9,7 @@ RUN Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/
         Write-Host 'CHECKSUM VERIFICATION FAILED!'; \
         exit 1; \
     }; \
-    Expand-Archive "$env:TEMP\MinGit.zip" -DestinationPath .\temp\MinGit; \
+    Expand-Archive "$env:TEMP\MinGit.zip" -DestinationPath c:\MinGit; \
     $env:PATH = $env:PATH + ';C:\MinGit\cmd\;C:\MinGit\cmd'; \
     Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\' -Name Path -Value $env:PATH
     
