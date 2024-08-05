@@ -509,7 +509,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
-                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null)
+                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null && runner.RunnerAction != null)
                     {
                         runnerRuntime.Runners.Remove(runner.Name);
                         delete = true;
@@ -531,7 +531,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
                 }
-                _logger.LogInformation("Runner action purged (dangling): {name}", RunnerAction.Name);
+                _logger.LogInformation("Runner action purged (dangling action): {name}", RunnerAction.Name);
             }
         }
         foreach (var runnerRuntime in runnerRuntimeMap.Values)
@@ -552,7 +552,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     {
                         _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
                     }
-                    _logger.LogInformation("Runner action purged (dangling): {name}", runner.RunnerAction.Name);
+                    _logger.LogInformation("Runner action purged (dangling action): {name}", runner.RunnerAction.Name);
                 }
             }
         }
