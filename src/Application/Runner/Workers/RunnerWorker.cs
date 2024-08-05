@@ -509,7 +509,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
-                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null && runner.RunnerAction != null)
+                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null)
                     {
                         runnerRuntime.Runners.Remove(runner.Name);
                         delete = true;
