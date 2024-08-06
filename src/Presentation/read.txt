@@ -1,10 +1,23 @@
 
 
-docker -H "npipe:////./pipe/docker_engine_linux" build -t "try-linux" -f "./Dockerfiles/LinuxDockerfile" .
-docker -H "npipe:////./pipe/docker_engine_linux" run --name "try-linux" --cpus="4" --memory="8g" -it --rm "try-linux" /bin/bash
+docker -H "npipe:////./pipe/docker_engine_linux" build -t "trylinux:test" -f "./Dockerfiles/LinuxDockerfile" .
+docker -H "npipe:////./pipe/docker_engine_linux" run --name "trylinux" --cpus="4" --memory="8g" -it --rm "trylinux:test" /bin/bash
 
 
 
-docker -H "npipe:////./pipe/docker_engine_windows" build -t "try-windows" -f "./Dockerfiles/WindowsDockerfile" .
-docker -H "npipe:////./pipe/docker_engine_windows" run --name "try-windows" --cpus="4" --memory="8g" -it --rm "try-windows" powershell
+docker -H "npipe:////./pipe/docker_engine_windows" build -t "trywindows:test" -f "./Dockerfiles/WindowsDockerfile" .
+docker -H "npipe:////./pipe/docker_engine_windows" run --name "trywindows" --cpus="4" --memory="8g" -it --rm "trywindows:test" powershell
 
+
+
+
+
+vagrant plugin install vagrant-vbguest
+vagrant plugin install vagrant-scp
+
+
+
+
+vagrant 
+
+mkdir Ubuntu2204Vagrantfile
