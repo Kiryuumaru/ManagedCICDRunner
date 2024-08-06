@@ -368,16 +368,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                         AbsolutePath hostAssetsDir;
 
-                        string vagrantfile = $"""
-                            Vagrant.configure("2") do |config|
-                              config.vm.box = "{baseVagrantBuildId}"
-                            """;
+                        string inputScript;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
                             hostAssetsDir = LinuxHostAssetsDir;
                             //vagrantfile += $"""
 
-                            //      config.vm.provision "shell", inline: <<-SHELL
+                            //      config.vm.provision "shell", inline: <<-SCRIPT
                             //        mkdir "/runner"
                             //        cd "/runner"
                             //        cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
@@ -385,52 +382,41 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             //        tar xzf ./actions-runner-linux-x64.tar.gz
                             //        sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
                             //        ./bin/installdependencies.sh
-                            //      SHELL
+                            //      SCRIPT
                             //    """;
-                            vagrantfile += $"""
-
-                                  config.vm.provision "shell", inline: <<-SHELL
-                                    mkdir "/runner"
-                                    cd "/runner"
-                                    cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
-                                    tar xzf ./actions-runner-linux-x64.tar.gz
-                                    ./bin/installdependencies.sh
-                                  SHELL
+                            inputScript = $"""
+                                mkdir "/runner"
+                                cd "/runner"
+                                cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
+                                tar xzf ./actions-runner-linux-x64.tar.gz
+                                ./bin/installdependencies.sh
                                 """;
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
                             hostAssetsDir = WindowsHostAssetsDir;
                             //vagrantfile += $"""
-                                
-                            //      config.vm.provision "shell", inline: <<-SHELL
+
+                            //      config.vm.provision "shell", inline: <<-SCRIPT
                             //        mkdir "C:\runner"
                             //        cd "C:\runner"
                             //        cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
                             //        ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
                             //        Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
                             //        [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
-                            //      SHELL
+                            //      SCRIPT
                             //    """;
-                            vagrantfile += $"""
-                                
-                                  config.vm.provision "shell", inline: <<-SHELL
-                                    mkdir "C:\runner"
-                                    cd "C:\runner"
-                                    Copy-Item "\\Server01\Share\Get-Widget.ps1" -Destination "$PWD/actions-runner-win-x64.zip"
-                                    Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                                  SHELL
+                            inputScript = $"""
+                                mkdir "C:\runner"
+                                cd "C:\runner"
+                                Copy-Item "C:\vagrant\assets\actions-runner-win-x64.zip" -Destination "$PWD\actions-runner-win-x64.zip"
+                                Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD\actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
                                 """;
                         }
                         else
                         {
                             throw new NotSupportedException();
                         }
-
-                        vagrantfile += $"""
-
-                                end
-                                """;
 
                         async void run()
                         {
@@ -439,8 +425,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 building[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, null, stoppingToken);
-                                    await vagrantService.Build(vagrantBuildId, runnerRev, vagrantfile, hostAssetsDir, stoppingToken);
+                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, [], stoppingToken);
+                                    await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, runnerRev, inputScript, [hostAssetsDir], stoppingToken);
                                     //await vagrantService.Run(vagrantBuildId, replicaId, runnerRev, cpus, memoryGB);
 
                                     _logger.LogInformation("Runner created (up): {id}", replicaId);

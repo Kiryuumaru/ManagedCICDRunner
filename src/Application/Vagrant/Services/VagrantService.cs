@@ -25,6 +25,7 @@ public class VagrantService(ILogger<VagrantService> logger)
     private static readonly AbsolutePath DataPath = Defaults.DataPath / "vagrant";
     private static readonly AbsolutePath BuildPath = DataPath / "build";
     private static readonly AbsolutePath ReplicaPath = DataPath / "replica";
+    private static readonly AbsolutePath TempPath = DataPath / "temp";
 
     public async Task<VagrantBuild[]> GetBuilds(CancellationToken cancellationToken)
     {
@@ -38,7 +39,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     }
 
-    public async Task Build(string id, string rev, string vagrantfile, AbsolutePath? hostAssetsDir, CancellationToken cancellationToken)
+    public async Task Build(string id, string rev, string vagrantfile, AbsolutePath[] hostAssets, CancellationToken cancellationToken)
     {
         AbsolutePath boxPath = BuildPath / id;
         AbsolutePath revPath = boxPath / "rev";
@@ -59,9 +60,16 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await vagrantfilePath.WriteAllTextAsync(vagrantfile, cancellationToken);
 
-        if (hostAssetsDir != null)
+        foreach (var hostAsset in hostAssets)
         {
-            await hostAssetsDir.CopyRecursively(boxPath / "assets");
+            if (hostAsset.FileExists())
+            {
+                await hostAsset.CopyRecursively(boxPath / hostAsset.Name);
+            }
+            else
+            {
+                await hostAsset.CopyRecursively(boxPath / "assets");
+            }
         }
 
         await Cli.RunListenAndLog(_logger, $"vagrant up", boxPath, stoppingToken: cancellationToken);
@@ -70,6 +78,58 @@ public class VagrantService(ILogger<VagrantService> logger)
         await Cli.RunListenAndLog(_logger, $"vagrant destroy -f", boxPath, stoppingToken: cancellationToken);
 
         await revPath.WriteAllTextAsync(rev, cancellationToken);
+    }
+
+    public async Task Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, string inputScript, AbsolutePath[] hostAssets, CancellationToken cancellationToken)
+    {
+        AbsolutePath boxPath = BuildPath / buildId;
+        AbsolutePath revPath = boxPath / "rev";
+
+        string? currentRev = null;
+        if (revPath.FileExists())
+        {
+            currentRev = await revPath.ReadAllTextAsync(cancellationToken);
+        }
+
+        if (currentRev == rev)
+        {
+            return;
+        }
+
+        AbsolutePath bootstrapPath;
+        string vagrantfile = $"""
+            Vagrant.configure("2") do |config|
+              config.vm.box = "{baseBuildId}"
+            """;
+        if (runnerOSType == RunnerOSType.Linux)
+        {
+            bootstrapPath = TempPath / buildId / "bootstrap.sh";
+            vagrantfile += $"""
+
+                  config.vm.provision "shell", path: "/vagrant/assets/bootstrap.sh"
+                """;
+        }
+        else if (runnerOSType == RunnerOSType.Windows)
+        {
+            bootstrapPath = TempPath / buildId / "bootstrap.ps1";
+            vagrantfile += $"""
+
+                  config.vm.provision "shell", path: "C:/vagrant/assets/bootstrap.ps1"
+                """;
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+        await bootstrapPath.WriteAllTextAsync(inputScript, cancellationToken);
+        vagrantfile += $"""
+
+            end
+            """;
+
+        hostAssets = [.. hostAssets, .. new AbsolutePath[] { bootstrapPath }];
+
+        await Build(buildId, rev, vagrantfile, hostAssets, cancellationToken);
     }
 
     public async Task<VagrantReplica[]> GetReplicas(CancellationToken cancellationToken)
