@@ -9,10 +9,12 @@ namespace Infrastructure.SQLite;
 
 internal class SQLiteLocalStore
 {
-    private readonly SQLiteAsyncConnection _db = new(Defaults.DataPath / ".db");
+    private static readonly AbsolutePath _dbPath = Defaults.DataPath / ".db";
+    private readonly SQLiteAsyncConnection _db = new(_dbPath);
 
     private async Task Bootstrap()
     {
+        _dbPath.Parent.CreateDirectory();
         await _db.CreateTableAsync<SQLiteDataHolder>();
     }
 
