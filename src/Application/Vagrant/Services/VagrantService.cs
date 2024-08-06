@@ -97,37 +97,27 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
 
         AbsolutePath bootstrapPath;
-        string vagrantfile = $"""
-            Vagrant.configure("2") do |config|
-              config.vm.box = "{baseBuildId}"
-            """;
         if (runnerOSType == RunnerOSType.Linux)
         {
             bootstrapPath = TempPath / buildId / "bootstrap.sh";
-            vagrantfile += $"""
-
-                  config.vm.provision "shell", path: "/vagrant/assets/bootstrap.sh"
-                """;
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
             bootstrapPath = TempPath / buildId / "bootstrap.ps1";
-            vagrantfile += $"""
-
-                  config.vm.provision "shell", path: "C:/vagrant/assets/bootstrap.ps1"
-                """;
         }
         else
         {
             throw new NotSupportedException();
         }
-        await bootstrapPath.WriteAllTextAsync(inputScript, cancellationToken);
-        vagrantfile += $"""
 
+        await bootstrapPath.WriteAllTextAsync(inputScript, cancellationToken);
+
+        string vagrantfile = $"""
+            Vagrant.configure("2") do |config|
+              config.vm.box = "{baseBuildId}"
+              config.vm.provision "shell", path: "{bootstrapPath}"
             end
             """;
-
-        hostAssets = [.. hostAssets, .. new AbsolutePath[] { bootstrapPath }];
 
         await Build(buildId, rev, vagrantfile, hostAssets, cancellationToken);
     }
