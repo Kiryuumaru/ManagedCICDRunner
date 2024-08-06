@@ -26,14 +26,14 @@ public class VagrantService(ILogger<VagrantService> logger)
     private static readonly AbsolutePath BuildPath = DataPath / "build";
     private static readonly AbsolutePath ReplicaPath = DataPath / "replica";
 
-    public async Task<VagrantBuild[]> GetBuilds()
+    public async Task<VagrantBuild[]> GetBuilds(CancellationToken cancellationToken)
     {
         List<VagrantBuild> vagrantBuilds = [];
 
         return [.. vagrantBuilds];
     }
 
-    public async Task DeleteBuild(params string[] ids)
+    public async Task DeleteBuild(string id, CancellationToken cancellationToken)
     {
 
     }
@@ -67,7 +67,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         await revPath.WriteAllTextAsync(rev, cancellationToken);
     }
 
-    public async Task<VagrantReplica[]> GetReplicas()
+    public async Task<VagrantReplica[]> GetReplicas(CancellationToken cancellationToken)
     {
         List<VagrantReplica> vagrantReplicas = [];
 
@@ -75,7 +75,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             AbsolutePath vagrantfilePath = dir / "Vagrantfile";
             AbsolutePath replicaFilePath = dir / "replica.json";
-            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>() is not JsonDocument replicaJson)
+            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson)
             {
                 continue;
             }
@@ -96,25 +96,22 @@ public class VagrantService(ILogger<VagrantService> logger)
         return [.. vagrantReplicas];
     }
 
-    public async Task DeleteReplica(params string[] ids)
+    public async Task DeleteReplica(string id, CancellationToken cancellationToken)
     {
-        foreach (var id in ids)
+        AbsolutePath dir = ReplicaPath / id;
+        AbsolutePath vagrantfilePath = dir / "Vagrantfile";
+        AbsolutePath replicaFilePath = dir / "replica.json";
+        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists())
         {
-            AbsolutePath dir = ReplicaPath / id;
-            AbsolutePath vagrantfilePath = dir / "Vagrantfile";
-            AbsolutePath replicaFilePath = dir / "replica.json";
-            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists())
-            {
-                continue;
-            }
-
-            await Cli.RunListenAndLog(_logger, $"vagrant destroy -f", dir);
-
-            dir.DeleteDirectory();
+            return;
         }
+
+        await Cli.RunListenAndLog(_logger, $"vagrant destroy -f", dir, stoppingToken: cancellationToken);
+
+        dir.DeleteDirectory();
     }
 
-    public async Task Run(string buildId, string replicaId, string rev, int cpus, int memoryGB, string? input, Dictionary<string, string> labels)
+    public async Task Run(string buildId, string replicaId, string rev, int cpus, int memoryGB, string? input, Dictionary<string, string> labels, CancellationToken cancellationToken)
     {
         var replicaObj = new
         {
@@ -131,14 +128,14 @@ public class VagrantService(ILogger<VagrantService> logger)
             throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica already exists");
         }
 
-        await replicaFilePath.WriteObjAsync(replicaObj);
+        await replicaFilePath.WriteObjAsync(replicaObj, cancellationToken: cancellationToken);
 
         await vagrantfilePath.WriteObjAsync($"""
             Vagrant.configure("2") do |config|
               config.vm.box = "{buildId}"
             end
-            """);
+            """, cancellationToken: cancellationToken);
 
-        await Cli.RunListenAndLog(_logger, $"vagrant up", dir);
+        await Cli.RunListenAndLog(_logger, $"vagrant up", dir, stoppingToken: cancellationToken);
     }
 }

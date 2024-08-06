@@ -128,7 +128,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var runnerEntityMap = (await runnerService.GetAll(stoppingToken)).GetValueOrThrow();
 
         _logger.LogDebug("Fetching vagrant instances from service...");
-        var vagrantReplicas = await vagrantService.GetReplicas();
+        var vagrantReplicas = await vagrantService.GetReplicas(stoppingToken);
 
         _logger.LogDebug("Fetching runner token actions from API...");
         Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokenMap = [];
