@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Docker.Enums;
+namespace Domain.Vagrant.Enums;
 
-public enum ContainerState
+public enum InstanceState
 {
-    Created, Running, Restarting, Exited, Paused, Dead, Removing
+    NotCreated, Off, Running
 }
