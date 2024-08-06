@@ -369,12 +369,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         string vagrantfile = $"""
                             Vagrant.configure("2") do |config|
                               config.vm.box = "{baseVagrantBuildId}"
-                              
                             """;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
                             vagrantfile += $"""
-                                  config.vm.provision "file", source: "{LinuxHostAssetsDir}", destination: "/runner"
+
+                                  config.vm.provision "file", source: "{LinuxHostAssetsDir.ToString().Replace("\\", "\\\\")}", destination: "/runner"
                                   config.vm.provision "shell", inline: <<-SHELL
                                     cd "/runner"
                                     ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
@@ -387,6 +387,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
                             vagrantfile += $"""
+
                                 WORKDIR "C:\runner"
                                 SHELL ["powershell"]
                                 ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
