@@ -35,12 +35,11 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly ILogger<RunnerWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    private readonly static AbsolutePath HostAssetsDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "HostAssets";
+    private readonly static AbsolutePath HostAssetsDir = Defaults.DataPath / "host-assets";
     private readonly static AbsolutePath LinuxHostAssetsDir = HostAssetsDir / "linux";
     private readonly static AbsolutePath WindowsHostAssetsDir = HostAssetsDir / "windows";
     private readonly static AbsolutePath LinuxActionsRunner = LinuxHostAssetsDir / "actions-runner-linux-x64.tar.gz";
     private readonly static AbsolutePath WindowsActionsRunner = WindowsHostAssetsDir / "actions-runner-win-x64.zip";
-    private readonly static AbsolutePath ActionsRunnerVagrantfilesDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "Vagrantfiles" / ".ActionsRunner";
 
     private readonly static (RunnerOSType OS, string Url, string Hash, AbsolutePath Path)[] HostAssetMatrix =
     [
