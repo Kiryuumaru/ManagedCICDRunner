@@ -115,7 +115,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         string vagrantfile = $"""
             Vagrant.configure("2") do |config|
               config.vm.box = "{baseBuildId}"
-              config.vm.provision "shell", path: "{bootstrapPath}"
+              config.vm.provision "shell", path: "{bootstrapPath.ToString().Replace("\\", "/")}"
             end
             """;
 
