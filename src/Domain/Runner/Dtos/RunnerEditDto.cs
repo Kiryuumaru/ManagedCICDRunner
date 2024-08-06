@@ -13,7 +13,7 @@ public class RunnerEditDto
 
     public RunnerOSType? NewRunnerOS { get; init; }
 
-    public int? NewCount { get; init; }
+    public int? NewReplicas { get; init; }
 
     public int? NewCpus { get; init; }
 

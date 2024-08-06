@@ -15,7 +15,7 @@ public class RunnerInstance
 
     public required RunnerAction? RunnerAction { get; init; }
 
-    public required VagrantInstance? VagrantInstance { get; init; }
+    public required VagrantReplica? VagrantReplica { get; init; }
 
     public required RunnerStatus Status { get; init; }
 }

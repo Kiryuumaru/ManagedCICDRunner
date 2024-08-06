@@ -7,15 +7,13 @@ using System.Threading.Tasks;
 
 namespace Domain.Vagrant.Models;
 
-public class VagrantInstance
+public class VagrantReplica
 {
     public required string Id { get; init; }
 
-    public required string Image { get; init; }
+    public required string Rev { get; init; }
 
-    public required string Name { get; init; }
-
-    public required InstanceState State { get; init; }
+    public required VagrantReplicaState State { get; init; }
 
     public required Dictionary<string, string> Labels { get; init; }
 }

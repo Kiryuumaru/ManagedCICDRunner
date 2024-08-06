@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Vagrant.Enums;
 
-public enum InstanceState
+public enum VagrantReplicaState
 {
     NotCreated, Off, Running
 }

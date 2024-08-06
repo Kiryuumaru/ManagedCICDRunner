@@ -21,7 +21,7 @@ public class RunnerEntity
 
     public required RunnerOSType RunnerOS { get; init; }
 
-    public required int Count { get; init; }
+    public required int Replicas { get; init; }
 
     public required int Cpus { get; init; }
 

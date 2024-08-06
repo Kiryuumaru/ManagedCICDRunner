@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Domain.Vagrant.Models;
 
-public class VagrantBox
+public class VagrantBuild
 {
     public required string Repository { get; init; }
 

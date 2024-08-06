@@ -128,7 +128,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var runnerEntityMap = (await runnerService.GetAll(stoppingToken)).GetValueOrThrow();
 
         _logger.LogDebug("Fetching vagrant instances from service...");
-        var vagrantInstances = await vagrantService.GetInstances();
+        var vagrantReplicas = await vagrantService.GetReplicas();
 
         _logger.LogDebug("Fetching runner token actions from API...");
         Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokenMap = [];
@@ -206,6 +206,123 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
+        _logger.LogDebug("Updating vagrant replicas to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runnerRuntime.RunnerId);
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    VagrantReplica = vagrantReplica,
+                    RunnerAction = runner.RunnerAction,
+                    Status = runner.Status,
+                };
+            }
+        }
+
+        _logger.LogDebug("Updating action runners to runtime runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(runner.Name);
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    VagrantReplica = runner.VagrantReplica,
+                    RunnerAction = RunnerAction,
+                    Status = runner.Status,
+                };
+            }
+        }
+
+        _logger.LogDebug("Adding runner entities and runner token entities to runtime runners...");
+        foreach (var runnerEntity in runnerEntityMap.Values)
+        {
+            if (runnerRuntimeMap.ContainsKey(runnerEntity.Id))
+            {
+                continue;
+            }
+            if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
+            {
+                continue;
+            }
+            runnerRuntimeMap[runnerEntity.Id] = new()
+            {
+                TokenId = runnerTokenEntity.Id,
+                TokenRev = runnerTokenEntity.Rev,
+                RunnerId = runnerEntity.Id,
+                RunnerRev = runnerEntity.Rev,
+                RunnerTokenEntity = runnerTokenEntity,
+                RunnerEntity = runnerEntity,
+                Runners = [],
+            };
+        }
+
+        _logger.LogDebug("Adding docker containers to runtime runners...");
+        foreach (var vagrantReplica in vagrantReplicas)
+        {
+            if (!runnerRuntimeMap.TryGetValue(vagrantReplica.Id, out var runnerRuntime))
+            {
+                continue;
+            }
+            var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(vagrantReplica.Id);
+            runnerRuntime.Runners[vagrantReplica.Id] = new()
+            {
+                Name = vagrantReplica.Id,
+                VagrantReplica = vagrantReplica,
+                RunnerAction = RunnerAction,
+                Status = RunnerStatus.Building,
+            };
+        }
+
+        _logger.LogDebug("Adding action runners to runtime runners...");
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        {
+            if (!runnerRuntimeMap.TryGetValue(RunnerAction.RunnerId, out var runnerRuntime))
+            {
+                continue;
+            }
+            if (runnerRuntime.Runners.ContainsKey(RunnerAction.Name))
+            {
+                continue;
+            }
+            var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runnerRuntime.RunnerId);
+            runnerRuntime.Runners[RunnerAction.Name] = new()
+            {
+                Name = RunnerAction.Name,
+                VagrantReplica = vagrantReplica,
+                RunnerAction = RunnerAction,
+                Status = RunnerStatus.Building,
+            };
+        }
+
+        _logger.LogDebug("Updating runtime runner instance status...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                RunnerStatus runnerStatus = RunnerStatus.Building;
+                if (runner.VagrantReplica != null && runner.RunnerAction != null)
+                {
+                    runnerStatus = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                }
+                else if (runner.VagrantReplica != null && runner.RunnerAction == null)
+                {
+                    runnerStatus = RunnerStatus.Starting;
+                }
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    VagrantReplica = runner.VagrantReplica,
+                    RunnerAction = runner.RunnerAction,
+                    Status = runnerStatus
+                };
+            }
+        }
+
         _logger.LogDebug("Checking for runners to upscale...");
         foreach (var runnerRuntime in runnerRuntimeMap.Values)
         {
@@ -213,13 +330,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
+            if (runnerRuntime.RunnerEntity.Replicas > runnerRuntime.Runners.Count)
             {
                 var runners = runnerRuntime.Runners.ToArray();
                 var runnerRev = runnerRuntime.RunnerRev;
                 var runnerTokenRev = runnerRuntime.TokenRev;
 
-                for (int i = 0; i < (runnerRuntime.RunnerEntity.Count - runners.Length); i++)
+                for (int i = 0; i < (runnerRuntime.RunnerEntity.Replicas - runners.Length); i++)
                 {
                     string id = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
                     string replicaId = $"{id}-{runnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
@@ -242,7 +359,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         runnerRuntime.Runners[replicaId] = new RunnerInstance()
                         {
                             Name = replicaId,
-                            VagrantInstance = null,
+                            VagrantReplica = null,
                             RunnerAction = null,
                             Status = RunnerStatus.Building
                         };
