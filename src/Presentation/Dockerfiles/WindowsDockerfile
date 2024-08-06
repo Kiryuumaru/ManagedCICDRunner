@@ -13,6 +13,7 @@ RUN Invoke-WebRequest 'https://github.com/git-for-windows/git/releases/download/
     $env:PATH = $env:PATH + ';C:\MinGit\cmd\;C:\MinGit\cmd'; \
     Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\' -Name Path -Value $env:PATH
     
+# Install Visual Studio
 RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\vs_community.exe" -UseBasicParsing; \
     & "$env:TEMP\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller --includeRecommended \
     --add Microsoft.VisualStudio.Workload.Azure \
@@ -29,3 +30,9 @@ RUN Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "
     --add Microsoft.VisualStudio.Workload.Universal \
     --add Microsoft.VisualStudio.Workload.VisualStudioExtension \
     | Out-Default
+    
+# Install AZ CLI
+ENV AZCLI_VERSION=2.51.0
+RUN Invoke-WebRequest -Uri https://azcliprod.blob.core.windows.net/msi/azure-cli-$env:AZCLI_VERSION-x64.msi -OutFile "$env:TEMP\AzureCLI.msi" -UseBasicParsing; \
+    Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\AzureCLI.msi", '/quiet', '/norestart' -NoNewWindow -Wait
+    
