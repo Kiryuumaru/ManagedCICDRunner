@@ -18,6 +18,23 @@ vagrant plugin install vagrant-scp
 
 
 
-vagrant 
 
-mkdir Ubuntu2204Vagrantfile
+mkdir .Ubuntu2204Vagrantfile
+copy /b /v /y "Ubuntu2204Vagrantfile" ".Ubuntu2204Vagrantfile\Vagrantfile"
+cd .Ubuntu2204Vagrantfile
+vagrant up
+
+vagrant scp "C:\Users\Administrator\source\repos\Kiryuumaru\ManagedCICDRunner\src\Presentation\HostAssets\linux":"/runner"
+
+
+vagrant package --output "vag.box"
+
+vagrant box add --name vag "vag.box"
+vagrant destroy -f
+
+
+
+
+
+
+

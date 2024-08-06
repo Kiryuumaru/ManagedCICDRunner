@@ -207,6 +207,121 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
         }
 
+        _logger.LogDebug("Checking for runners to upscale...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerToken))
+            {
+                continue;
+            }
+            if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
+            {
+                var runners = runnerRuntime.Runners.ToArray();
+                var runnerRev = runnerRuntime.RunnerRev;
+                var runnerTokenRev = runnerRuntime.TokenRev;
+
+                for (int i = 0; i < (runnerRuntime.RunnerEntity.Count - runners.Length); i++)
+                {
+                    string id = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
+                    string replicaId = $"{id}-{runnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                    string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllTextAsync(stoppingToken);
+                    string baseVagrantBuildId = $"{id}-base";
+                    string vagrantBuildId = $"{id}";
+                    string runnerId = runnerRuntime.RunnerEntity.Id;
+                    int cpus = runnerRuntime.RunnerEntity.Cpus;
+                    int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
+                    RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
+                    string runnerOsStr = runnerOs switch
+                    {
+                        RunnerOSType.Linux => "linux",
+                        RunnerOSType.Windows => "windows",
+                        _ => throw new NotSupportedException()
+                    };
+
+                    try
+                    {
+                        runnerRuntime.Runners[replicaId] = new RunnerInstance()
+                        {
+                            Name = replicaId,
+                            VagrantInstance = null,
+                            RunnerAction = null,
+                            Status = RunnerStatus.Building
+                        };
+
+                        _logger.LogInformation("Runner preparing: {id}", replicaId);
+
+                        string vagrantfile = $"""
+                            Vagrant.configure("2") do |config|
+                              config.vm.box = "{baseVagrantBuildId}"
+                              
+                            """;
+                        if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                        {
+                            vagrantfile += $"""
+                                  config.vm.provision "file", source: "{LinuxHostAssetsDir}", destination: "/runner"
+                                  config.vm.provision "shell", inline: <<-SHELL
+                                    cd "/runner"
+                                    ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
+                                    tar xzf ./actions-runner-linux-x64.tar.gz
+                                    sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
+                                    ./bin/installdependencies.sh
+                                  SHELL
+                                """;
+                        }
+                        else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                        {
+                            vagrantfile += $"""
+                                WORKDIR "C:\runner"
+                                SHELL ["powershell"]
+                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
+                                RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                                RUN [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
+                                """;
+                        }
+                        else
+                        {
+                            throw new NotSupportedException();
+                        }
+
+                        vagrantfile += $"""
+
+                                END
+                                """;
+
+                        async void run()
+                        {
+                            try
+                            {
+                                building[replicaId] = runnerRuntime.Runners[replicaId];
+                                await executorLocker.Execute(vagrantBuildId, async () =>
+                                {
+                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, stoppingToken);
+                                    await vagrantService.Build(vagrantBuildId, runnerRev, vagrantfile, stoppingToken);
+
+                                    _logger.LogInformation("Runner created (up): {id}", replicaId);
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogInformation("Runner rev run error: {ex}", ex.Message);
+                                runnerRuntime.Runners.Remove(replicaId);
+                            }
+                            finally
+                            {
+                                building.Remove(replicaId, out _);
+                            }
+                        }
+                        run();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogInformation("Runner rev init error: {ex}", ex.Message);
+                        runnerRuntime.Runners.Remove(replicaId);
+                    }
+                }
+            }
+        }
+
         await runnerRuntimeHolder.Set(() => new(runnerRuntimeMap));
 
         _logger.LogDebug("Runner routine end");
@@ -256,5 +371,26 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
         }
+    }
+
+    private static AbsolutePath GetPath(string path)
+    {
+        AbsolutePath absolutePath;
+
+        if (Path.IsPathRooted(path))
+        {
+            absolutePath = path;
+        }
+        else
+        {
+            absolutePath = AbsolutePath.Parse(Environment.CurrentDirectory) / path;
+        }
+
+        if (!absolutePath.FileExists())
+        {
+            throw new Exception($"\"{path}\" does not exists");
+        }
+
+        return absolutePath;
     }
 }

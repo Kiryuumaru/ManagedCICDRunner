@@ -16,6 +16,7 @@ public static class Cli
     public static Command BuildRun(
         string path,
         string[] args,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         PipeTarget? outPipeTarget = default,
@@ -23,8 +24,19 @@ public static class Cli
     {
         Command osCli = CliWrap.Cli.Wrap(path)
             .WithArguments(args, false)
-            .WithValidation(CommandResultValidation.None)
-            .WithEnvironmentVariables(environmentVariables?.ToDictionary() ?? []);
+            .WithValidation(CommandResultValidation.None);
+
+        if (workingDirectory != null)
+        {
+            osCli = osCli
+                .WithWorkingDirectory(workingDirectory);
+        }
+
+        if (environmentVariables != null)
+        {
+            osCli = osCli
+            .WithEnvironmentVariables(environmentVariables.ToDictionary());
+        }
 
         if (inPipeTarget != null)
         {
@@ -49,6 +61,7 @@ public static class Cli
 
     public static Command BuildRun(
         string command,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         PipeTarget? outPipeTarget = default,
@@ -56,11 +69,11 @@ public static class Cli
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return BuildRun("cmd", ["/c", $"\"{command}\""], environmentVariables, inPipeTarget, outPipeTarget, errPipeTarget);
+            return BuildRun("cmd", ["/c", $"\"{command}\""], workingDirectory, environmentVariables, inPipeTarget, outPipeTarget, errPipeTarget);
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            return BuildRun("/bin/bash", ["-c", $"\"{command}\""], environmentVariables, inPipeTarget, outPipeTarget, errPipeTarget);
+            return BuildRun("/bin/bash", ["-c", $"\"{command}\""], workingDirectory, environmentVariables, inPipeTarget, outPipeTarget, errPipeTarget);
         }
         else
         {
@@ -71,12 +84,13 @@ public static class Cli
     public static async Task<string> RunOnce(
         string path,
         string[] args,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         CancellationToken stoppingToken = default)
     {
         var stdBuffer = new StringBuilder();
 
-        await BuildRun(path, args, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
+        await BuildRun(path, args, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
             .ExecuteAsync(stoppingToken);
 
         return stdBuffer.ToString();
@@ -84,12 +98,13 @@ public static class Cli
 
     public static async Task<string> RunOnce(
         string command,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         CancellationToken stoppingToken = default)
     {
         var stdBuffer = new StringBuilder();
 
-        await BuildRun(command, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
+        await BuildRun(command, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
             .ExecuteAsync(stoppingToken);
 
         return stdBuffer.ToString();
@@ -98,11 +113,12 @@ public static class Cli
     public static IAsyncEnumerable<CommandEvent> RunListen(
         string path,
         string[] args,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         CancellationToken stoppingToken = default)
     {
-        var osCli = BuildRun(path, args, environmentVariables, inPipeTarget);
+        var osCli = BuildRun(path, args, workingDirectory, environmentVariables, inPipeTarget);
 
         return osCli.ListenAsync(stoppingToken);
     }
@@ -111,11 +127,12 @@ public static class Cli
         ILogger logger,
         string path,
         string[] args,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         CancellationToken stoppingToken = default)
     {
-        await foreach (var cmdEvent in RunListen(path, args, environmentVariables, inPipeTarget, stoppingToken))
+        await foreach (var cmdEvent in RunListen(path, args, workingDirectory, environmentVariables, inPipeTarget, stoppingToken))
         {
             switch (cmdEvent)
             {
@@ -142,11 +159,12 @@ public static class Cli
 
     public static IAsyncEnumerable<CommandEvent> RunListen(
         string command,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         CancellationToken stoppingToken = default)
     {
-        var osCli = BuildRun(command, environmentVariables, inPipeTarget);
+        var osCli = BuildRun(command, workingDirectory, environmentVariables, inPipeTarget);
 
         return osCli.ListenAsync(stoppingToken);
     }
@@ -154,11 +172,12 @@ public static class Cli
     public static async Task RunListenAndLog(
         ILogger logger,
         string command,
+        AbsolutePath? workingDirectory = default,
         IDictionary<string, string?>? environmentVariables = default,
         PipeSource? inPipeTarget = default,
         CancellationToken stoppingToken = default)
     {
-        await foreach (var cmdEvent in RunListen(command, environmentVariables, inPipeTarget, stoppingToken))
+        await foreach (var cmdEvent in RunListen(command, workingDirectory, environmentVariables, inPipeTarget, stoppingToken))
         {
             switch (cmdEvent)
             {

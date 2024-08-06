@@ -11,7 +11,7 @@ public class RunnerAddDto
 {
     public required string TokenId { get; init; }
 
-    public required string Image { get; init; }
+    public required string Vagrantfile { get; init; }
 
     public required RunnerOSType RunnerOS { get; init; }
 

@@ -9,7 +9,7 @@ namespace Domain.Runner.Dtos;
 
 public class RunnerEditDto
 {
-    public string? NewImage { get; init; }
+    public string? NewVagrantfile { get; init; }
 
     public RunnerOSType? NewRunnerOS { get; init; }
 
