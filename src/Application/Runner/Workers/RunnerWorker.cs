@@ -380,7 +380,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                   config.vm.provision "shell", inline: <<-SHELL
                                     mkdir "/runner"
                                     cd "/runner"
-                                    cp /vagrant/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
+                                    cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
                                     ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
                                     tar xzf ./actions-runner-linux-x64.tar.gz
                                     sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
