@@ -115,6 +115,8 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
+        if (!DirectoryExists()) return [];
+
         if (depth == 0)
             return [];
 
@@ -131,20 +133,23 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
-        var paths = new string[] { Path };
-        while (paths.Length != 0 && depth > 0)
+        if (DirectoryExists())
         {
-            var matchingDirectories = paths
-                .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
-                .Where(x => (File.GetAttributes(x) & attributes) == attributes)
-                .OrderBy(x => x)
-                .Select(Parse).ToList();
+            var paths = new string[] { Path };
+            while (paths.Length != 0 && depth > 0)
+            {
+                var matchingDirectories = paths
+                    .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
+                    .Where(x => (File.GetAttributes(x) & attributes) == attributes)
+                    .OrderBy(x => x)
+                    .Select(Parse).ToList();
 
-            foreach (var matchingDirectory in matchingDirectories)
-                yield return matchingDirectory;
+                foreach (var matchingDirectory in matchingDirectories)
+                    yield return matchingDirectory;
 
-            depth--;
-            paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+                depth--;
+                paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+            }
         }
     }
 
