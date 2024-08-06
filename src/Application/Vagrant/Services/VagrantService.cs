@@ -40,7 +40,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task Build(string id, string rev, string vagrantfile, CancellationToken cancellationToken)
     {
-        AbsolutePath boxPath = DataPath / id;
+        AbsolutePath boxPath = BuildPath / id;
         AbsolutePath revPath = boxPath / "rev";
 
         string? currentRev = null;
