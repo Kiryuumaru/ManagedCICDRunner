@@ -9,5 +9,5 @@ namespace Application;
 
 public static class Defaults
 {
-    public static AbsolutePath DataPath { get; } = AbsolutePath.Parse(Environment.CurrentDirectory) / ".data";
+    public static AbsolutePath DataPath { get; } = AbsolutePath.Create(Environment.CurrentDirectory) / ".data";
 }

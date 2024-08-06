@@ -366,15 +366,17 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                         _logger.LogInformation("Runner preparing: {id}", replicaId);
 
+                        AbsolutePath hostAssetsDir;
+
                         string vagrantfile = $"""
                             Vagrant.configure("2") do |config|
                               config.vm.box = "{baseVagrantBuildId}"
                             """;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
+                            hostAssetsDir = LinuxHostAssetsDir;
                             vagrantfile += $"""
 
-                                  config.vm.provision "file", source: "{LinuxHostAssetsDir.ToString().Replace("\\", "\\\\")}", destination: "/runner"
                                   config.vm.provision "shell", inline: <<-SHELL
                                     cd "/runner"
                                     ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
@@ -386,6 +388,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
+                            hostAssetsDir = WindowsHostAssetsDir;
                             vagrantfile += $"""
 
                                 WORKDIR "C:\runner"
@@ -402,7 +405,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                         vagrantfile += $"""
 
-                                END
+                                end
                                 """;
 
                         async void run()
@@ -412,8 +415,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 building[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, stoppingToken);
-                                    await vagrantService.Build(vagrantBuildId, runnerRev, vagrantfile, stoppingToken);
+                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, null, stoppingToken);
+                                    await vagrantService.Build(vagrantBuildId, runnerRev, vagrantfile, hostAssetsDir, stoppingToken);
 
                                     _logger.LogInformation("Runner created (up): {id}", replicaId);
                                 });
@@ -500,7 +503,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
         else
         {
-            absolutePath = AbsolutePath.Parse(Environment.CurrentDirectory) / path;
+            absolutePath = AbsolutePath.Create(Environment.CurrentDirectory) / path;
         }
 
         if (!absolutePath.FileExists())

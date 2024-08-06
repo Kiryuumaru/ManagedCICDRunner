@@ -38,7 +38,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     }
 
-    public async Task Build(string id, string rev, string vagrantfile, CancellationToken cancellationToken)
+    public async Task Build(string id, string rev, string vagrantfile, AbsolutePath? hostAssetsDir, CancellationToken cancellationToken)
     {
         AbsolutePath boxPath = BuildPath / id;
         AbsolutePath revPath = boxPath / "rev";
@@ -58,6 +58,11 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath vagrantfilePath = boxPath / "Vagrantfile";
 
         await vagrantfilePath.WriteAllTextAsync(vagrantfile, cancellationToken);
+
+        if (hostAssetsDir != null)
+        {
+            await hostAssetsDir.CopyRecursively(boxPath / "assets");
+        }
 
         await Cli.RunListenAndLog(_logger, $"vagrant up", boxPath, stoppingToken: cancellationToken);
         await Cli.RunListenAndLog(_logger, $"vagrant package --output \"{packageBoxPath}\"", boxPath, stoppingToken: cancellationToken);
