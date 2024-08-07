@@ -8,7 +8,7 @@ namespace Domain.Vagrant.Models;
 
 public class VagrantBuild
 {
-    public required string Repository { get; init; }
+    public required string Id { get; init; }
 
-    public required string Tag { get; init; }
+    public required string Rev { get; init; }
 }

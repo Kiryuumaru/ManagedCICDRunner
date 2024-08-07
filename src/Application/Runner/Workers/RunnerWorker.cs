@@ -354,70 +354,88 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         _ => throw new NotSupportedException()
                     };
 
-                    try
+                    runnerRuntime.Runners[replicaId] = new RunnerInstance()
                     {
-                        runnerRuntime.Runners[replicaId] = new RunnerInstance()
-                        {
-                            Name = replicaId,
-                            VagrantReplica = null,
-                            RunnerAction = null,
-                            Status = RunnerStatus.Building
-                        };
+                        Name = replicaId,
+                        VagrantReplica = null,
+                        RunnerAction = null,
+                        Status = RunnerStatus.Building
+                    };
 
-                        _logger.LogInformation("Runner preparing: {id}", replicaId);
+                    _logger.LogInformation("Runner preparing: {id}", replicaId);
 
-                        AbsolutePath hostAssetsDir;
-
-                        string inputScript;
-                        if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
-                        {
-                            hostAssetsDir = LinuxHostAssetsDir;
-                            //vagrantfile += $"""
-
-                            //      config.vm.provision "shell", inline: <<-SCRIPT
-                            //        mkdir "/runner"
-                            //        cd "/runner"
-                            //        cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
-                            //        ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
-                            //        tar xzf ./actions-runner-linux-x64.tar.gz
-                            //        sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
-                            //        ./bin/installdependencies.sh
-                            //      SCRIPT
-                            //    """;
-                            inputScript = $"""
+                    AbsolutePath hostAssetsDir;
+                    string bootstrapInputScript;
+                    if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                    {
+                        hostAssetsDir = LinuxHostAssetsDir;
+                        bootstrapInputScript = $"""
                                 mkdir "/runner"
                                 cd "/runner"
                                 cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
                                 tar xzf ./actions-runner-linux-x64.tar.gz
                                 ./bin/installdependencies.sh
                                 """;
-                        }
-                        else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
-                        {
-                            hostAssetsDir = WindowsHostAssetsDir;
-                            //vagrantfile += $"""
-
-                            //      config.vm.provision "shell", inline: <<-SCRIPT
-                            //        mkdir "C:\runner"
-                            //        cd "C:\runner"
-                            //        cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
-                            //        ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
-                            //        Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                            //        [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
-                            //      SCRIPT
-                            //    """;
-                            inputScript = $"""
+                    }
+                    else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                    {
+                        hostAssetsDir = WindowsHostAssetsDir;
+                        bootstrapInputScript = $"""
                                 mkdir "C:\runner"
                                 cd "C:\runner"
                                 Copy-Item "C:\vagrant\assets\actions-runner-win-x64.zip" -Destination "$PWD\actions-runner-win-x64.zip"
                                 Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD\actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
                                 """;
+                    }
+                    else
+                    {
+                        throw new NotSupportedException();
+                    }
+
+                    Dictionary<string, string> labels = [];
+                    async Task<string> runnerInputScriptFactory()
+                    {
+                        var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
+                        tokenResponse.ThrowIfErrorOrHasNoValue();
+                        string regToken = tokenResponse.Value["token"];
+                        string inputArgs = $"--name {replicaId} --url {GetConfigUrl(runnerToken)} --ephemeral --unattended --token {regToken}";
+                        if (runnerRuntime.RunnerEntity.Labels.Length != 0)
+                        {
+                            inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
+                        }
+                        if (!string.IsNullOrEmpty(runnerRuntime.RunnerEntity.Group))
+                        {
+                            inputArgs += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
+                        }
+                        string inputScript;
+                        if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                        {
+                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                                export RUNNER_ALLOW_RUNASROOT=1
+                                cd "/runner"
+                                sudo -E ./config.sh {inputArgs}
+                                sudo -E ./run.sh
+                                """);
+                        }
+                        else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                        {
+                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                                $ErrorActionPreference='Stop'; $verbosePreference='Continue'
+                                $env:RUNNER_ALLOW_RUNASROOT=1
+                                cd "C:\runner"
+                                ./config.cmd {inputArgs}
+                                ./run.cmd
+                                """);
                         }
                         else
                         {
                             throw new NotSupportedException();
                         }
+                        return inputScript;
+                    }
 
+                    try
+                    {
                         async void run()
                         {
                             try
@@ -425,11 +443,54 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 building[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, [], stoppingToken);
-                                    await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, runnerRev, inputScript, [hostAssetsDir], stoppingToken);
-                                    //await vagrantService.Run(vagrantBuildId, replicaId, runnerRev, cpus, memoryGB);
+                                    try
+                                    {
+                                        await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, [], stoppingToken);
+                                    }
+                                    catch
+                                    {
+                                        try
+                                        {
+                                            await vagrantService.DeleteBuild(baseVagrantBuildId, stoppingToken);
+                                        }
+                                        catch { }
+                                        throw;
+                                    }
+                                    try
+                                    {
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, runnerRev, bootstrapInputScript, [hostAssetsDir], stoppingToken);
+                                    }
+                                    catch
+                                    {
+                                        try
+                                        {
+                                            await vagrantService.DeleteBuild(vagrantBuildId, stoppingToken);
+                                        }
+                                        catch { }
+                                        throw;
+                                    }
+
+                                    await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, runnerRev, cpus, memoryGB, labels, stoppingToken);
 
                                     _logger.LogInformation("Runner created (up): {id}", replicaId);
+
+                                    async void execute()
+                                    {
+                                        try
+                                        {
+                                            await vagrantService.Execute(runnerOs, replicaId, runnerInputScriptFactory, stoppingToken);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogError("Runner rev execute error: {ex}", ex.Message);
+                                        }
+                                        try
+                                        {
+                                            //await vagrantService.DeleteReplica(replicaId, stoppingToken);
+                                        }
+                                        catch { }
+                                    }
+                                    execute();
                                 });
                             }
                             catch (Exception ex)
@@ -501,6 +562,28 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         else
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
+        }
+    }
+
+    private static string NormalizeScriptInput(RunnerOSType runnerOS, string input)
+    {
+        if (runnerOS == RunnerOSType.Linux)
+        {
+            return input.Replace("\n\r", " && ")
+                .Replace("\r\n", " && ")
+                .Replace("\n", " && ")
+                .Replace("\"", "\\\"");
+        }
+        else if (runnerOS == RunnerOSType.Windows)
+        {
+            return input.Replace("\n\r", " ; ")
+                .Replace("\r\n", " ; ")
+                .Replace("\n", " ; ")
+                .Replace("\"", "\\\"");
+        }
+        else
+        {
+            throw new NotSupportedException();
         }
     }
 
