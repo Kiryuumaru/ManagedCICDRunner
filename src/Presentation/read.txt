@@ -34,6 +34,48 @@ vagrant destroy -f
 
 
 
+{
+  "githubToken": "github_pat_svsvsvV",
+  "githubRepo": "vianactl",
+  "githubOrg": "skunkworks-ai"
+}
+
+
+{
+  "tokenId": "fqrfxg",
+  "vagrantfile": "Vagrantfiles/Ubuntu2204Vagrantfile",
+  "runnerOS": "Linux",
+  "replicas": 1,
+  "cpus": 4,
+  "memoryGB": 8,
+  "group": "default",
+  "labels": [
+    "self-hosted",
+    "ubuntu-22.04",
+    "x64"
+  ]
+}
+
+
+
+{
+  "tokenId": "fqrfxg",
+  "vagrantfile": "Vagrantfiles/Windows11Vagrantfile",
+  "runnerOS": "Windows",
+  "replicas": 1,
+  "cpus": 4,
+  "memoryGB": 8,
+  "group": "default",
+  "labels": [
+    "self-hosted",
+    "windows-11",
+    "x64"
+  ]
+}
+
+
+
+
 
 
 

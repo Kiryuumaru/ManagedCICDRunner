@@ -97,13 +97,16 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
 
         AbsolutePath bootstrapPath;
+        string sshShell;
         if (runnerOSType == RunnerOSType.Linux)
         {
             bootstrapPath = TempPath / buildId / "bootstrap.sh";
+            sshShell = "/bin/sh";
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
             bootstrapPath = TempPath / buildId / "bootstrap.ps1";
+            sshShell = "powershell";
         }
         else
         {
@@ -116,6 +119,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             Vagrant.configure("2") do |config|
               config.vm.box = "{baseBuildId}"
               config.vm.provision "shell", path: "{bootstrapPath.ToString().Replace("\\", "/")}"
+              config.ssh.shell = "{sshShell}"
             end
             """;
 
