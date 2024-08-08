@@ -8,5 +8,5 @@ namespace Domain.Vagrant.Enums;
 
 public enum VagrantReplicaState
 {
-    NotCreated, Off, Running
+    NotCreated, Starting, Off, Running
 }

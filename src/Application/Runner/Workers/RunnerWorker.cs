@@ -7,6 +7,8 @@ using Domain.Runner.Dtos;
 using Domain.Runner.Entities;
 using Domain.Runner.Enums;
 using Domain.Runner.Models;
+using Domain.Vagrant.Enums;
+using Domain.Vagrant.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -61,6 +63,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly Dictionary<string, RunnerRuntime> runnerRuntimeMap = [];
 
     private readonly ConcurrentDictionary<string, RunnerInstance> building = [];
+    private readonly ConcurrentDictionary<string, RunnerInstance> executing = [];
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -211,7 +214,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             foreach (var runner in runnerRuntime.Runners.Values)
             {
-                var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runnerRuntime.RunnerId);
+                var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runner.Name);
                 runnerRuntime.Runners[runner.Name] = new()
                 {
                     Name = runner.Name,
@@ -261,10 +264,11 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             };
         }
 
-        _logger.LogDebug("Adding docker containers to runtime runners...");
+        _logger.LogDebug("Adding vagrant replicas to runtime runners...");
         foreach (var vagrantReplica in vagrantReplicas)
         {
-            if (!runnerRuntimeMap.TryGetValue(vagrantReplica.Id, out var runnerRuntime))
+            var runnerId = vagrantReplica.Labels["runnerId"];
+            if (!runnerRuntimeMap.TryGetValue(runnerId, out var runnerRuntime))
             {
                 continue;
             }
@@ -289,7 +293,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runnerRuntime.RunnerId);
+            var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == RunnerAction.Name);
             runnerRuntime.Runners[RunnerAction.Name] = new()
             {
                 Name = RunnerAction.Name,
@@ -297,6 +301,265 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 RunnerAction = RunnerAction,
                 Status = RunnerStatus.Building,
             };
+        }
+
+        _logger.LogDebug("Removing deleted runner tokens...");
+        foreach (var runnerTokenEntity in runnerTokenEntityMap.Values)
+        {
+            if (!runnerTokenEntity.Deleted)
+            {
+                continue;
+            }
+            foreach (var runnerRuntime in runnerRuntimeMap.Values.Where(i => i.TokenId == runnerTokenEntity.Id))
+            {
+                (await runnerService.Delete(runnerRuntime.RunnerEntity.Id, false, stoppingToken)).ThrowIfError();
+                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+                {
+                    if (runner.RunnerAction != null)
+                    {
+                        try
+                        {
+                            (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                        }
+                    }
+                    if (runner.VagrantReplica != null)
+                    {
+                        await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                    }
+                    runnerRuntime.Runners.Remove(runner.Name);
+                    _logger.LogInformation("Runner purged (token deleted): {name}", runner.Name);
+                }
+                (await runnerService.Delete(runnerRuntime.RunnerId, true, stoppingToken)).ThrowIfError();
+                runnerRuntimeMap.Remove(runnerRuntime.RunnerId);
+                _logger.LogInformation("Runner instance purged (token deleted): {name}", runnerRuntime.RunnerId);
+            }
+            (await runnerTokenService.Delete(runnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
+            _logger.LogInformation("Runner token purged (token deleted): {name}", runnerTokenEntity.Id);
+        }
+
+        _logger.LogDebug("Removing deleted runners...");
+        foreach (var runnerEntity in runnerEntityMap.Values)
+        {
+            if (!runnerEntity.Deleted)
+            {
+                continue;
+            }
+            if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
+            {
+                continue;
+            }
+            if (!runnerRuntimeMap.TryGetValue(runnerEntity.Id, out var runnerRuntime))
+            {
+                continue;
+            }
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                if (runner.VagrantReplica != null)
+                {
+                    await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                }
+                if (runner.RunnerAction != null)
+                {
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
+                }
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
+            }
+            (await runnerService.Delete(runnerEntity.Id, true, stoppingToken)).ThrowIfError();
+            runnerRuntimeMap.Remove(runnerEntity.Id);
+            _logger.LogInformation("Runner instance purged (runner deleted): {name}", runnerEntity.Id);
+        }
+
+        _logger.LogDebug("Removing dangling runner actions...");
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        {
+            bool delete = false;
+            foreach (var runnerRuntime in runnerRuntimeMap.Values)
+            {
+                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+                {
+                    if (runner.Name == RunnerAction.Name && (runner.VagrantReplica == null || runner.VagrantReplica.State == VagrantReplicaState.Off))
+                    {
+                        if (runner.VagrantReplica != null)
+                        {
+                            await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                        }
+                        runnerRuntime.Runners.Remove(runner.Name);
+                        delete = true;
+                        break;
+                    }
+                }
+                if (delete)
+                {
+                    break;
+                }
+            }
+            if (delete)
+            {
+                try
+                {
+                    (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
+                }
+                _logger.LogInformation("Runner action purged (dangling action): {name}", RunnerAction.Name);
+            }
+        }
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values)
+            {
+                if (runner.VagrantReplica == null && runner.RunnerAction != null)
+                {
+                    if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
+                    _logger.LogInformation("Runner action purged (dangling action): {name}", runner.RunnerAction.Name);
+                }
+            }
+        }
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                if (!building.ContainsKey(runner.Name) && !executing.ContainsKey(runner.Name))
+                {
+                    if (runner.RunnerAction != null)
+                    {
+                        try
+                        {
+                            (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                        }
+                    }
+                    if (runner.VagrantReplica != null)
+                    {
+                        await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                    }
+                    runnerRuntime.Runners.Remove(runner.Name);
+                    _logger.LogInformation("Runner action purged (untracked action): {name}", runner.Name);
+                }
+            }
+        }
+        foreach (var vagrantReplica in vagrantReplicas)
+        {
+            if (vagrantReplica.State == VagrantReplicaState.Off && !building.ContainsKey(vagrantReplica.Id) && !executing.ContainsKey(vagrantReplica.Id))
+            {
+                await vagrantService.DeleteReplica(vagrantReplica.Id, stoppingToken);
+                _logger.LogInformation("Vagrant replica purged (dead replica): {name}", vagrantReplica.Id);
+            }
+        }
+
+        _logger.LogDebug("Removing outdated runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
+        {
+            if (runnerRuntime.TokenRev == runnerRuntime.RunnerTokenEntity.Rev &&
+                runnerRuntime.RunnerRev == runnerRuntime.RunnerEntity.Rev)
+            {
+                continue;
+            }
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                if (runner.VagrantReplica != null)
+                {
+                    await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                }
+                if (runner.RunnerAction != null)
+                {
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
+                }
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
+            }
+            runnerRuntimeMap[runnerRuntime.RunnerId] = new()
+            {
+                TokenId = runnerRuntime.TokenId,
+                TokenRev = runnerRuntime.RunnerTokenEntity.Rev,
+                RunnerId = runnerRuntime.RunnerId,
+                RunnerRev = runnerRuntime.RunnerEntity.Rev,
+                RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
+                RunnerEntity = runnerRuntime.RunnerEntity,
+                Runners = runnerRuntime.Runners,
+            };
+        }
+
+        _logger.LogDebug("Removing excess runners...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
+        {
+            while (runnerRuntime.RunnerEntity.Replicas < runnerRuntime.Runners.Count)
+            {
+                var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready) ??
+                    runnerRuntime.Runners.Values.FirstOrDefault();
+                if (runner == null)
+                {
+                    break;
+                }
+                if (runner.VagrantReplica != null)
+                {
+                    await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                }
+                if (runner.RunnerAction != null)
+                {
+                    try
+                    {
+                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
+                    }
+                }
+                runnerRuntime.Runners.Remove(runner.Name);
+                _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
+            }
+        }
+
+        _logger.LogDebug("Removing dangling builds...");
+        foreach (var vagrantBuild in await vagrantService.GetBuilds(stoppingToken))
+        {
+            string[] idSplit = vagrantBuild.Id.Split('-');
+            if (idSplit.Length < 3)
+            {
+                continue;
+            }
+            var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
+            if (runnerRuntime == null || vagrantBuild.Rev != $"{runnerRuntime.TokenRev}-{runnerRuntime.RunnerRev}")
+            {
+                await vagrantService.DeleteBuild(vagrantBuild.Id, stoppingToken);
+                _logger.LogInformation("Runner vagrant build (dangling): {name}", vagrantBuild.Id);
+            }
         }
 
         _logger.LogDebug("Updating runtime runner instance status...");
@@ -333,13 +596,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             if (runnerRuntime.RunnerEntity.Replicas > runnerRuntime.Runners.Count)
             {
                 var runners = runnerRuntime.Runners.ToArray();
-                var runnerRev = runnerRuntime.RunnerRev;
-                var runnerTokenRev = runnerRuntime.TokenRev;
+                var rev = $"{runnerRuntime.TokenRev}-{runnerRuntime.RunnerRev}";
 
                 for (int i = 0; i < (runnerRuntime.RunnerEntity.Replicas - runners.Length); i++)
                 {
                     string id = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
-                    string replicaId = $"{id}-{runnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                    string replicaId = $"{id}-{runnerRuntime.RunnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
                     string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllTextAsync(stoppingToken);
                     string baseVagrantBuildId = $"{id}-base";
                     string vagrantBuildId = $"{id}";
@@ -370,22 +632,22 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     {
                         hostAssetsDir = LinuxHostAssetsDir;
                         bootstrapInputScript = $"""
-                                mkdir "/runner"
-                                cd "/runner"
-                                cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
-                                tar xzf ./actions-runner-linux-x64.tar.gz
-                                ./bin/installdependencies.sh
-                                """;
+                            mkdir "/runner"
+                            cd "/runner"
+                            cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
+                            tar xzf ./actions-runner-linux-x64.tar.gz
+                            ./bin/installdependencies.sh
+                            """;
                     }
                     else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                     {
                         hostAssetsDir = WindowsHostAssetsDir;
                         bootstrapInputScript = $"""
-                                mkdir "C:\runner"
-                                cd "C:\runner"
-                                Copy-Item "C:\vagrant\assets\actions-runner-win-x64.zip" -Destination "$PWD\actions-runner-win-x64.zip"
-                                Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD\actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                                """;
+                            mkdir "C:\runner"
+                            cd "C:\runner"
+                            Copy-Item "C:\vagrant\assets\actions-runner-win-x64.zip" -Destination "$PWD\actions-runner-win-x64.zip"
+                            Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD\actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                            """;
                     }
                     else
                     {
@@ -393,6 +655,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
 
                     Dictionary<string, string> labels = [];
+                    labels["baseVagrantBuildId"] = baseVagrantBuildId;
+                    labels["vagrantBuildId"] = vagrantBuildId;
+                    labels["runnerId"] = runnerId;
+                    labels["tokenRev"] = runnerRuntime.TokenRev.ToLowerInvariant();
+                    labels["runnerRev"] = runnerRuntime.RunnerRev.ToLowerInvariant();
+
                     async Task<string> runnerInputScriptFactory()
                     {
                         var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
@@ -415,6 +683,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 cd "/runner"
                                 sudo -E ./config.sh {inputArgs}
                                 sudo -E ./run.sh
+                                sudo shutdown -h now
                                 """);
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
@@ -425,6 +694,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 cd "C:\runner"
                                 ./config.cmd {inputArgs}
                                 ./run.cmd
+                                shutdown /s /f
                                 """);
                         }
                         else
@@ -443,9 +713,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 building[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
+                                    building[replicaId] = runnerRuntime.Runners[replicaId];
                                     try
                                     {
-                                        await vagrantService.Build(baseVagrantBuildId, runnerRev, baseVagrantfile, [], stoppingToken);
+                                        await vagrantService.Build(baseVagrantBuildId, rev, baseVagrantfile, [], stoppingToken);
                                     }
                                     catch
                                     {
@@ -458,7 +729,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, runnerRev, bootstrapInputScript, [hostAssetsDir], stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, rev, bootstrapInputScript, [hostAssetsDir], stoppingToken);
                                     }
                                     catch
                                     {
@@ -470,10 +741,11 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         throw;
                                     }
 
-                                    await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, runnerRev, cpus, memoryGB, labels, stoppingToken);
+                                    await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
 
                                     _logger.LogInformation("Runner created (up): {id}", replicaId);
 
+                                    executing[replicaId] = runnerRuntime.Runners[replicaId];
                                     async void execute()
                                     {
                                         try
@@ -484,18 +756,17 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         {
                                             _logger.LogError("Runner rev execute error: {ex}", ex.Message);
                                         }
-                                        try
+                                        finally
                                         {
-                                            //await vagrantService.DeleteReplica(replicaId, stoppingToken);
+                                            executing.Remove(replicaId, out _);
                                         }
-                                        catch { }
                                     }
                                     execute();
                                 });
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogInformation("Runner rev run error: {ex}", ex.Message);
+                                _logger.LogError("Runner rev run error: {ex}", ex.Message);
                                 runnerRuntime.Runners.Remove(replicaId);
                             }
                             finally

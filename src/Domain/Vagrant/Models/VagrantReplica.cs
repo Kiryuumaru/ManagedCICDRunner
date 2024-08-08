@@ -9,6 +9,8 @@ namespace Domain.Vagrant.Models;
 
 public class VagrantReplica
 {
+    public required string BuildId { get; init; }
+
     public required string Id { get; init; }
 
     public required string Rev { get; init; }

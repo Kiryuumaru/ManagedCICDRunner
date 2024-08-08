@@ -4,6 +4,7 @@ using CliWrap.EventStream;
 using Domain.Runner.Entities;
 using Domain.Runner.Enums;
 using Domain.Runner.Models;
+using Domain.Vagrant.Enums;
 using Domain.Vagrant.Models;
 using Microsoft.Extensions.Logging;
 using System;
@@ -69,7 +70,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         var buildObj = new
         {
-            buildId,
+            id = buildId,
             rev
         };
         await buildFilePath.WriteObjAsync(buildObj, cancellationToken: cancellationToken);
@@ -190,7 +191,29 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await vagrantfilePath.WriteAllTextAsync(await vagrantfileFactory(replicaPath), cancellationToken: cancellationToken);
 
-        await Cli.RunListenAndLog(_logger, $"vagrant up", replicaPath, stoppingToken: cancellationToken);
+        await foreach (var cmdEvent in Cli.RunListen($"vagrant up", replicaPath, stoppingToken: cancellationToken))
+        {
+            switch (cmdEvent)
+            {
+                case StandardOutputCommandEvent stdOut:
+                    _logger.LogDebug("{x}", stdOut.Text);
+                    break;
+                case StandardErrorCommandEvent stdErr:
+                    _logger.LogError("{x}", stdErr.Text);
+                    break;
+                case ExitedCommandEvent exited:
+                    var msg = $"vagrant up ended with return code {exited.ExitCode}";
+                    if (exited.ExitCode != 0)
+                    {
+                        throw new Exception(msg);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("{x}", msg);
+                    }
+                    break;
+            }
+        }
     }
 
     public Task Run(string buildId, string replicaId, string rev, string vagrantfile, Dictionary<string, string> labels, CancellationToken cancellationToken)
@@ -271,15 +294,49 @@ public class VagrantService(ILogger<VagrantService> logger)
                 continue;
             }
 
+            string buildId = replicaJson.RootElement.GetProperty("buildId").GetString()!;
             string replicaId = replicaJson.RootElement.GetProperty("replicaId").GetString()!;
             string replicaRev = replicaJson.RootElement.GetProperty("rev").GetString()!;
             var replicaLabels = replicaJson.RootElement.GetProperty("labels").EnumerateObject().ToDictionary(i => i.Name, i => i.Value.GetString()!)!;
 
+            VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
+            await foreach (var commandEvent in Cli.RunListen($"vagrant status --machine-readable", dir, stoppingToken: cancellationToken))
+            {
+                string line = "";
+                switch (commandEvent)
+                {
+                    case StandardOutputCommandEvent outEvent:
+                        _logger.LogDebug("{x}", outEvent.Text);
+                        line = outEvent.Text;
+                        break;
+                    case StandardErrorCommandEvent errEvent:
+                        _logger.LogDebug("{x}", errEvent.Text);
+                        line = errEvent.Text;
+                        break;
+                }
+                if (!string.IsNullOrEmpty(line))
+                {
+                    string[] split = line.Split(',');
+                    if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        vagrantReplicaState = split[3].ToLowerInvariant() switch
+                        {
+                            "not_created" => VagrantReplicaState.NotCreated,
+                            "poweroff" => VagrantReplicaState.Off,
+                            "running" => VagrantReplicaState.Running,
+                            "starting" => VagrantReplicaState.Starting,
+                            _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
+                        };
+                    }
+                }
+            }
+
             vagrantReplicas.Add(new()
             {
+                BuildId = buildId,
                 Id = replicaId,
                 Rev = replicaRev,
-                State = Domain.Vagrant.Enums.VagrantReplicaState.NotCreated,
+                State = vagrantReplicaState,
                 Labels = replicaLabels
             });
         }
@@ -297,7 +354,29 @@ public class VagrantService(ILogger<VagrantService> logger)
             return;
         }
 
-        await Cli.RunListenAndLog(_logger, $"vagrant destroy -f", dir, stoppingToken: cancellationToken);
+        await foreach (var cmdEvent in Cli.RunListen($"vagrant destroy -f", dir, stoppingToken: cancellationToken))
+        {
+            switch (cmdEvent)
+            {
+                case StandardOutputCommandEvent stdOut:
+                    _logger.LogDebug("{x}", stdOut.Text);
+                    break;
+                case StandardErrorCommandEvent stdErr:
+                    _logger.LogError("{x}", stdErr.Text);
+                    break;
+                case ExitedCommandEvent exited:
+                    var msg = $"vagrant destroy -f ended with return code {exited.ExitCode}";
+                    if (exited.ExitCode != 0)
+                    {
+                        throw new Exception(msg);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("{x}", msg);
+                    }
+                    break;
+            }
+        }
 
         dir.DeleteDirectory();
     }
