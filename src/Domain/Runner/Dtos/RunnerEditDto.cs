@@ -9,11 +9,11 @@ namespace Domain.Runner.Dtos;
 
 public class RunnerEditDto
 {
-    public string? NewImage { get; init; }
+    public string? NewVagrantfile { get; init; }
 
     public RunnerOSType? NewRunnerOS { get; init; }
 
-    public int? NewCount { get; init; }
+    public int? NewReplicas { get; init; }
 
     public int? NewCpus { get; init; }
 

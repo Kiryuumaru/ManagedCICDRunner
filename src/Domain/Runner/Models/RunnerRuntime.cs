@@ -1,5 +1,4 @@
-﻿using Domain.Docker.Models;
-using Domain.Runner.Entities;
+﻿using Domain.Runner.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;

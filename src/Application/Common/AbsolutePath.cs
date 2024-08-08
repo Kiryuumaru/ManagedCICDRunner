@@ -15,7 +15,7 @@ namespace Application.Common;
 
 public class AbsolutePath
 {
-    public static AbsolutePath Parse(string path)
+    public static AbsolutePath Create(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -48,7 +48,7 @@ public class AbsolutePath
     {
         get
         {
-            return Parse(Directory.GetParent(Path)!.ToString());
+            return Create(Directory.GetParent(Path)!.ToString());
         }
     }
 
@@ -58,6 +58,15 @@ public class AbsolutePath
         get
         {
             return System.IO.Path.GetFileNameWithoutExtension(Path);
+        }
+    }
+
+    [JsonIgnore]
+    public string Name
+    {
+        get
+        {
+            return System.IO.Path.GetFileName(Path);
         }
     }
 
@@ -115,13 +124,15 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
+        if (!DirectoryExists()) return [];
+
         if (depth == 0)
             return [];
 
         var files = Directory.EnumerateFiles(Path, pattern, SearchOption.TopDirectoryOnly)
             .Where(x => (File.GetAttributes(x) & attributes) == attributes)
             .OrderBy(x => x)
-            .Select(Parse);
+            .Select(Create);
 
         return files.Concat(GetDirectories(depth: depth - 1).SelectMany(x => x.GetFiles(pattern, attributes: attributes)));
     }
@@ -131,20 +142,23 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
-        var paths = new string[] { Path };
-        while (paths.Length != 0 && depth > 0)
+        if (DirectoryExists())
         {
-            var matchingDirectories = paths
-                .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
-                .Where(x => (File.GetAttributes(x) & attributes) == attributes)
-                .OrderBy(x => x)
-                .Select(Parse).ToList();
+            var paths = new string[] { Path };
+            while (paths.Length != 0 && depth > 0)
+            {
+                var matchingDirectories = paths
+                    .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
+                    .Where(x => (File.GetAttributes(x) & attributes) == attributes)
+                    .OrderBy(x => x)
+                    .Select(Create).ToList();
 
-            foreach (var matchingDirectory in matchingDirectories)
-                yield return matchingDirectory;
+                foreach (var matchingDirectory in matchingDirectories)
+                    yield return matchingDirectory;
 
-            depth--;
-            paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+                depth--;
+                paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+            }
         }
     }
 

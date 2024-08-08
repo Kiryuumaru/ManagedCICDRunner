@@ -30,7 +30,7 @@ internal static class RoutineExecutor
             }
             else
             {
-                await Task.Delay(10, stoppingToken);
+                await Task.Delay(10);
             }
         }
     }

@@ -362,7 +362,4 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-/src/Presentation/dat.dat
-/src/Presentation/HostAssets/linux/actions-runner-linux-*
-/src/Presentation/HostAssets/windows/actions-runner-win-*
-/src/Presentation/Dockerfiles/.ActionsRunner
+/src/Presentation/.data
