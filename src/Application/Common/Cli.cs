@@ -177,6 +177,8 @@ public static class Cli
         PipeSource? inPipeTarget = default,
         CancellationToken stoppingToken = default)
     {
+        string errors = "";
+
         await foreach (var cmdEvent in RunListen(command, workingDirectory, environmentVariables, inPipeTarget, stoppingToken))
         {
             switch (cmdEvent)
@@ -186,9 +188,14 @@ public static class Cli
                     break;
                 case StandardErrorCommandEvent stdErr:
                     logger.LogDebug("{x}", stdErr.Text);
+                    if (errors != "")
+                    {
+                        errors += "\n";
+                    }
+                    errors += stdErr.Text;
                     break;
                 case ExitedCommandEvent exited:
-                    var msg = $"{command} ended with return code {exited.ExitCode}";
+                    var msg = $"{command} ended with return code {exited.ExitCode}: " + errors;
                     if (exited.ExitCode != 0)
                     {
                         throw new Exception(msg);

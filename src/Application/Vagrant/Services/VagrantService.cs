@@ -28,6 +28,8 @@ public class VagrantService(ILogger<VagrantService> logger)
     private static readonly AbsolutePath BuildPath = DataPath / "build";
     private static readonly AbsolutePath ReplicaPath = DataPath / "replica";
 
+    private const int ResilienceRetries = 5;
+
     public async Task Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, AbsolutePath[] hostAssets, CancellationToken cancellationToken)
     {
         AbsolutePath boxPath = BuildPath / buildId;
@@ -112,29 +114,40 @@ public class VagrantService(ILogger<VagrantService> logger)
         }, hostAssets, cancellationToken);
     }
 
+    public async Task<VagrantBuild?> GetBuild(string id, CancellationToken cancellationToken)
+    {
+        AbsolutePath dir = BuildPath / id;
+        AbsolutePath packageBoxPath = dir / "package.box";
+        AbsolutePath vagrantfilePath = dir / "Vagrantfile";
+        AbsolutePath buildFilePath = dir / "build.json";
+
+        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson)
+        {
+            return null;
+        }
+
+        string buildId = buildJson.RootElement.GetProperty("id").GetString()!;
+        string buildRev = buildJson.RootElement.GetProperty("rev").GetString()!;
+
+        return new()
+        {
+            Id = buildId,
+            Rev = buildRev
+        };
+    }
+
     public async Task<VagrantBuild[]> GetBuilds(CancellationToken cancellationToken)
     {
         List<VagrantBuild> vagrantBuilds = [];
 
         foreach (var dir in BuildPath.GetDirectories())
         {
-            AbsolutePath packageBoxPath = dir / "package.box";
-            AbsolutePath vagrantfilePath = dir / "Vagrantfile";
-            AbsolutePath buildFilePath = dir / "build.json";
+            var build = await GetBuild(dir.Name, cancellationToken);
 
-            if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson)
+            if (build != null)
             {
-                continue;
+                vagrantBuilds.Add(build);
             }
-
-            string buildId = buildJson.RootElement.GetProperty("id").GetString()!;
-            string buildRev = buildJson.RootElement.GetProperty("rev").GetString()!;
-
-            vagrantBuilds.Add(new()
-            {
-                Id = buildId,
-                Rev = buildRev
-            });
         }
 
         return [.. vagrantBuilds];
@@ -191,27 +204,58 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await vagrantfilePath.WriteAllTextAsync(await vagrantfileFactory(replicaPath), cancellationToken: cancellationToken);
 
-        await foreach (var cmdEvent in Cli.RunListen($"vagrant up", replicaPath, stoppingToken: cancellationToken))
+        int retries = 0;
+
+        while (true)
         {
-            switch (cmdEvent)
+            try
             {
-                case StandardOutputCommandEvent stdOut:
-                    _logger.LogDebug("{x}", stdOut.Text);
-                    break;
-                case StandardErrorCommandEvent stdErr:
-                    _logger.LogError("{x}", stdErr.Text);
-                    break;
-                case ExitedCommandEvent exited:
-                    var msg = $"vagrant up ended with return code {exited.ExitCode}";
-                    if (exited.ExitCode != 0)
+                await foreach (var cmdEvent in Cli.RunListen($"vagrant up", replicaPath, stoppingToken: cancellationToken))
+                {
+                    switch (cmdEvent)
                     {
-                        throw new Exception(msg);
+                        case StandardOutputCommandEvent stdOut:
+                            _logger.LogDebug("{x}", stdOut.Text);
+                            break;
+                        case StandardErrorCommandEvent stdErr:
+                            _logger.LogError("{x}", stdErr.Text);
+                            break;
+                        case ExitedCommandEvent exited:
+                            var msg = $"vagrant up ended with return code {exited.ExitCode}";
+                            if (exited.ExitCode != 0)
+                            {
+                                throw new Exception(msg);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("{x}", msg);
+                            }
+                            break;
                     }
-                    else
-                    {
-                        _logger.LogDebug("{x}", msg);
-                    }
-                    break;
+                }
+                break;
+            }
+            catch
+            {
+                if (retries > ResilienceRetries)
+                {
+                    throw;
+                }
+                _logger.LogWarning("vagrant up error ({}/{}): retrying...", retries, ResilienceRetries);
+                await Task.Delay(5000, cancellationToken);
+                retries++;
+            }
+        }
+
+
+        while (true)
+        {
+            await Task.Delay(2000, cancellationToken);
+
+            var replica = await GetReplica(replicaId, cancellationToken) ?? throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica was deleted");
+            if (replica.State == VagrantReplicaState.Running)
+            {
+                break;
             }
         }
     }
@@ -281,64 +325,76 @@ public class VagrantService(ILogger<VagrantService> logger)
         await Cli.RunListenAndLog(_logger, $"vagrant {vmCommunicator} -c \"{await inputScriptFactory()}\"", replicaPath, stoppingToken: cancellationToken);
     }
 
+    public async Task<VagrantReplica?> GetReplica(string id, CancellationToken cancellationToken)
+    {
+        AbsolutePath dir = ReplicaPath / id;
+        AbsolutePath vagrantfilePath = dir / "Vagrantfile";
+        AbsolutePath replicaFilePath = dir / "replica.json";
+        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson)
+        {
+            return null;
+        }
+
+        string buildId = replicaJson.RootElement.GetProperty("buildId").GetString()!;
+        string replicaId = replicaJson.RootElement.GetProperty("replicaId").GetString()!;
+        string replicaRev = replicaJson.RootElement.GetProperty("rev").GetString()!;
+        var replicaLabels = replicaJson.RootElement.GetProperty("labels").EnumerateObject().ToDictionary(i => i.Name, i => i.Value.GetString()!)!;
+
+        VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
+        await foreach (var commandEvent in Cli.RunListen($"vagrant status --machine-readable", dir, stoppingToken: cancellationToken))
+        {
+            string line = "";
+            switch (commandEvent)
+            {
+                case StandardOutputCommandEvent outEvent:
+                    _logger.LogDebug("{x}", outEvent.Text);
+                    line = outEvent.Text;
+                    break;
+                case StandardErrorCommandEvent errEvent:
+                    _logger.LogDebug("{x}", errEvent.Text);
+                    line = errEvent.Text;
+                    break;
+            }
+            if (!string.IsNullOrEmpty(line))
+            {
+                string[] split = line.Split(',');
+                if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    vagrantReplicaState = split[3].ToLowerInvariant() switch
+                    {
+                        "not_created" => VagrantReplicaState.NotCreated,
+                        "poweroff" => VagrantReplicaState.Off,
+                        "stopping" => VagrantReplicaState.Off,
+                        "running" => VagrantReplicaState.Running,
+                        "starting" => VagrantReplicaState.Starting,
+                        _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
+                    };
+                }
+            }
+        }
+
+        return new()
+        {
+            BuildId = buildId,
+            Id = replicaId,
+            Rev = replicaRev,
+            State = vagrantReplicaState,
+            Labels = replicaLabels
+        };
+    }
+
     public async Task<VagrantReplica[]> GetReplicas(CancellationToken cancellationToken)
     {
         List<VagrantReplica> vagrantReplicas = [];
 
         foreach (var dir in ReplicaPath.GetDirectories())
         {
-            AbsolutePath vagrantfilePath = dir / "Vagrantfile";
-            AbsolutePath replicaFilePath = dir / "replica.json";
-            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson)
+            var replica = await GetReplica(dir.Name, cancellationToken);
+
+            if (replica != null)
             {
-                continue;
+                vagrantReplicas.Add(replica);
             }
-
-            string buildId = replicaJson.RootElement.GetProperty("buildId").GetString()!;
-            string replicaId = replicaJson.RootElement.GetProperty("replicaId").GetString()!;
-            string replicaRev = replicaJson.RootElement.GetProperty("rev").GetString()!;
-            var replicaLabels = replicaJson.RootElement.GetProperty("labels").EnumerateObject().ToDictionary(i => i.Name, i => i.Value.GetString()!)!;
-
-            VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
-            await foreach (var commandEvent in Cli.RunListen($"vagrant status --machine-readable", dir, stoppingToken: cancellationToken))
-            {
-                string line = "";
-                switch (commandEvent)
-                {
-                    case StandardOutputCommandEvent outEvent:
-                        _logger.LogDebug("{x}", outEvent.Text);
-                        line = outEvent.Text;
-                        break;
-                    case StandardErrorCommandEvent errEvent:
-                        _logger.LogDebug("{x}", errEvent.Text);
-                        line = errEvent.Text;
-                        break;
-                }
-                if (!string.IsNullOrEmpty(line))
-                {
-                    string[] split = line.Split(',');
-                    if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        vagrantReplicaState = split[3].ToLowerInvariant() switch
-                        {
-                            "not_created" => VagrantReplicaState.NotCreated,
-                            "poweroff" => VagrantReplicaState.Off,
-                            "running" => VagrantReplicaState.Running,
-                            "starting" => VagrantReplicaState.Starting,
-                            _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
-                        };
-                    }
-                }
-            }
-
-            vagrantReplicas.Add(new()
-            {
-                BuildId = buildId,
-                Id = replicaId,
-                Rev = replicaRev,
-                State = vagrantReplicaState,
-                Labels = replicaLabels
-            });
         }
 
         return [.. vagrantReplicas];

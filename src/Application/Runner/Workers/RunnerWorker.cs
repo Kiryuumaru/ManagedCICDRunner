@@ -131,7 +131,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var runnerEntityMap = (await runnerService.GetAll(stoppingToken)).GetValueOrThrow();
 
         _logger.LogDebug("Fetching vagrant instances from service...");
-        var vagrantReplicas = await vagrantService.GetReplicas(stoppingToken);
+        var vagrantReplicas = (await vagrantService.GetReplicas(stoppingToken))
+            .ToDictionary(i => i.Id);
 
         _logger.LogDebug("Fetching runner token actions from API...");
         Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokenMap = [];
@@ -156,14 +157,24 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     if (nameSplit.Length == 5 && nameSplit[0] == "managed_runner" && nameSplit[1] == runnerControllerId)
                     {
                         string id = runnerJson.GetProperty("id").GetInt32().ToString();
+                        string statusStr = runnerJson.GetProperty("status").GetString()!;
                         bool busy = runnerJson.GetProperty("busy").GetBoolean();
+                        RunnerActionStatus status;
+                        if (statusStr.Equals("online"))
+                        {
+                            status = busy ? RunnerActionStatus.Busy : RunnerActionStatus.Ready;
+                        }
+                        else
+                        {
+                            status = RunnerActionStatus.Offline;
+                        }
                         var runnerId = nameSplit[2];
                         var runnerAction = new RunnerAction()
                         {
                             Id = id,
                             RunnerId = runnerId,
                             Name = name,
-                            Busy = busy
+                            Status = status
                         };
                         runnerActions.Add(runnerAction);
                         runnerActionMap[name] = (runnerAction, runnerToken);
@@ -173,75 +184,36 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             runnerTokenMap[runnerToken.Id] = (runnerToken, runnerActions);
         }
 
-        _logger.LogDebug("Updating runner entities to runtime runners...");
+        _logger.LogDebug("Updating entities to runtime runners map...");
         foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
-            if (runnerEntityMap.TryGetValue(runnerRuntime.RunnerId, out var runnerEntity))
+            var runnerEntity = runnerEntityMap.GetValueOrDefault(runnerRuntime.RunnerId);
+            var runnerTokenEntity = runnerTokenEntityMap.GetValueOrDefault(runnerRuntime.TokenId);
+            runnerRuntimeMap[runnerRuntime.RunnerId] = new()
             {
-                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
-                {
-                    TokenId = runnerRuntime.TokenId,
-                    TokenRev = runnerRuntime.TokenRev,
-                    RunnerId = runnerEntity.Id,
-                    RunnerRev = runnerRuntime.RunnerRev,
-                    RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
-                    RunnerEntity = runnerEntity,
-                    Runners = runnerRuntime.Runners,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating runner token entities to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
-        {
-            if (runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
-            {
-                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
-                {
-                    TokenId = runnerTokenEntity.Id,
-                    TokenRev = runnerRuntime.TokenRev,
-                    RunnerId = runnerRuntime.RunnerId,
-                    RunnerRev = runnerRuntime.RunnerRev,
-                    RunnerTokenEntity = runnerTokenEntity,
-                    RunnerEntity = runnerRuntime.RunnerEntity,
-                    Runners = runnerRuntime.Runners,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating vagrant replicas to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
+                TokenId = runnerRuntime.TokenId,
+                TokenRev = runnerRuntime.TokenRev,
+                RunnerId = runnerRuntime.RunnerId,
+                RunnerRev = runnerRuntime.RunnerRev,
+                RunnerTokenEntity = runnerTokenEntity ?? runnerRuntime.RunnerTokenEntity,
+                RunnerEntity = runnerEntity ?? runnerRuntime.RunnerEntity,
+                Runners = runnerRuntime.Runners,
+            };
             foreach (var runner in runnerRuntime.Runners.Values)
             {
-                var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == runner.Name);
-                runnerRuntime.Runners[runner.Name] = new()
-                {
-                    Name = runner.Name,
-                    VagrantReplica = vagrantReplica,
-                    RunnerAction = runner.RunnerAction,
-                    Status = runner.Status,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating action runners to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
-            foreach (var runner in runnerRuntime.Runners.Values)
-            {
+                var vagrantReplica = vagrantReplicas.GetValueOrDefault(runner.Name);
                 var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(runner.Name);
                 runnerRuntime.Runners[runner.Name] = new()
                 {
                     Name = runner.Name,
-                    VagrantReplica = runner.VagrantReplica,
+                    VagrantReplica = vagrantReplica,
                     RunnerAction = RunnerAction,
                     Status = runner.Status,
                 };
             }
         }
 
-        _logger.LogDebug("Adding runner entities and runner token entities to runtime runners...");
+        _logger.LogDebug("Adding entities to runtime runners map...");
         foreach (var runnerEntity in runnerEntityMap.Values)
         {
             if (runnerRuntimeMap.ContainsKey(runnerEntity.Id))
@@ -265,7 +237,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
 
         _logger.LogDebug("Adding vagrant replicas to runtime runners...");
-        foreach (var vagrantReplica in vagrantReplicas)
+        foreach (var vagrantReplica in vagrantReplicas.Values)
         {
             var runnerId = vagrantReplica.Labels["runnerId"];
             if (!runnerRuntimeMap.TryGetValue(runnerId, out var runnerRuntime))
@@ -293,7 +265,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            var vagrantReplica = vagrantReplicas.FirstOrDefault(i => i.Id == RunnerAction.Name);
+            var vagrantReplica = vagrantReplicas.GetValueOrDefault(RunnerAction.Name);
             runnerRuntime.Runners[RunnerAction.Name] = new()
             {
                 Name = RunnerAction.Name,
@@ -303,7 +275,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             };
         }
 
-        _logger.LogDebug("Removing deleted runner tokens...");
+        _logger.LogDebug("Removing deleted runners...");
         foreach (var runnerTokenEntity in runnerTokenEntityMap.Values)
         {
             if (!runnerTokenEntity.Deleted)
@@ -340,8 +312,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             (await runnerTokenService.Delete(runnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
             _logger.LogInformation("Runner token purged (token deleted): {name}", runnerTokenEntity.Id);
         }
-
-        _logger.LogDebug("Removing deleted runners...");
         foreach (var runnerEntity in runnerEntityMap.Values)
         {
             if (!runnerEntity.Deleted)
@@ -382,61 +352,43 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
 
         _logger.LogDebug("Removing dangling runner actions...");
-        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        Dictionary<string, VagrantReplica> vagrantReplicaToRemove = [];
+        Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionsToRemove = [];
+        foreach (var vagrantReplica in vagrantReplicas.Values)
         {
-            bool delete = false;
-            foreach (var runnerRuntime in runnerRuntimeMap.Values)
+            var (RunnerAction, RunnerTokenEntity) = runnerActionMap.GetValueOrDefault(vagrantReplica.Id);
+            if (!building.ContainsKey(vagrantReplica.Id) &&
+                !executing.ContainsKey(vagrantReplica.Id) &&
+                (
+                    vagrantReplica.State == VagrantReplicaState.Off ||
+                    vagrantReplica.State == VagrantReplicaState.NotCreated ||
+                    RunnerAction == null ||
+                    RunnerAction.Status == RunnerActionStatus.Offline
+                ))
             {
-                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+                vagrantReplicaToRemove[vagrantReplica.Id] = vagrantReplica;
+                if (RunnerAction != null)
                 {
-                    if (runner.Name == RunnerAction.Name && (runner.VagrantReplica == null || runner.VagrantReplica.State == VagrantReplicaState.Off))
-                    {
-                        if (runner.VagrantReplica != null)
-                        {
-                            await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
-                        }
-                        runnerRuntime.Runners.Remove(runner.Name);
-                        delete = true;
-                        break;
-                    }
+                    runnerActionsToRemove[RunnerAction.Name] = (RunnerAction, RunnerTokenEntity);
                 }
-                if (delete)
-                {
-                    break;
-                }
-            }
-            if (delete)
-            {
-                try
-                {
-                    (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
-                }
-                _logger.LogInformation("Runner action purged (dangling action): {name}", RunnerAction.Name);
             }
         }
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
         {
-            foreach (var runner in runnerRuntime.Runners.Values)
+            var vagrantReplica = vagrantReplicas.GetValueOrDefault(RunnerAction.Name);
+            if (!building.ContainsKey(RunnerAction.Name) &&
+                !executing.ContainsKey(RunnerAction.Name) &&
+                (
+                    RunnerAction.Status == RunnerActionStatus.Offline ||
+                    vagrantReplica == null ||
+                    vagrantReplica.State == VagrantReplicaState.Off ||
+                    vagrantReplica.State == VagrantReplicaState.NotCreated)
+                )
             {
-                if (runner.VagrantReplica == null && runner.RunnerAction != null)
+                runnerActionsToRemove[RunnerAction.Name] = (RunnerAction, RunnerTokenEntity);
+                if (vagrantReplica != null)
                 {
-                    if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
-                    {
-                        continue;
-                    }
-                    try
-                    {
-                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                    }
-                    _logger.LogInformation("Runner action purged (dangling action): {name}", runner.RunnerAction.Name);
+                    vagrantReplicaToRemove[vagrantReplica.Id] = vagrantReplica;
                 }
             }
         }
@@ -444,35 +396,48 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             foreach (var runner in runnerRuntime.Runners.Values.ToArray())
             {
-                if (!building.ContainsKey(runner.Name) && !executing.ContainsKey(runner.Name))
+                if (vagrantReplicaToRemove.ContainsKey(runner.Name) ||
+                    runnerActionsToRemove.ContainsKey(runner.Name) ||
+                    (
+                        !building.ContainsKey(runner.Name) &&
+                        !executing.ContainsKey(runner.Name) &&
+                        (
+                            runner.RunnerAction == null ||
+                            runner.RunnerAction.Status == RunnerActionStatus.Offline ||
+                            runner.VagrantReplica == null ||
+                            runner.VagrantReplica.State == VagrantReplicaState.Off ||
+                            runner.VagrantReplica.State == VagrantReplicaState.NotCreated
+                        )
+                    ))
                 {
                     if (runner.RunnerAction != null)
                     {
-                        try
-                        {
-                            (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                        }
+                        runnerActionsToRemove[runner.RunnerAction.Name] = (runner.RunnerAction, runnerRuntime.RunnerTokenEntity);
                     }
                     if (runner.VagrantReplica != null)
                     {
-                        await vagrantService.DeleteReplica(runner.VagrantReplica.Id, stoppingToken);
+                        vagrantReplicaToRemove[runner.VagrantReplica.Id] = runner.VagrantReplica;
                     }
                     runnerRuntime.Runners.Remove(runner.Name);
-                    _logger.LogInformation("Runner action purged (untracked action): {name}", runner.Name);
                 }
             }
         }
-        foreach (var vagrantReplica in vagrantReplicas)
+        foreach (var vagrantReplica in vagrantReplicaToRemove.Values)
         {
-            if (vagrantReplica.State == VagrantReplicaState.Off && !building.ContainsKey(vagrantReplica.Id) && !executing.ContainsKey(vagrantReplica.Id))
+            await vagrantService.DeleteReplica(vagrantReplica.Id, stoppingToken);
+            _logger.LogInformation("Vagrant replica purged (dead replica): {name}", vagrantReplica.Id);
+        }
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionsToRemove.Values)
+        {
+            try
             {
-                await vagrantService.DeleteReplica(vagrantReplica.Id, stoppingToken);
-                _logger.LogInformation("Vagrant replica purged (dead replica): {name}", vagrantReplica.Id);
+                (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
+            }
+            _logger.LogInformation("Runner action purged (dead action): {name}", RunnerAction.Name);
         }
 
         _logger.LogDebug("Removing outdated runners...");
@@ -570,7 +535,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 RunnerStatus runnerStatus = RunnerStatus.Building;
                 if (runner.VagrantReplica != null && runner.RunnerAction != null)
                 {
-                    runnerStatus = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
+                    runnerStatus = runner.RunnerAction.Status switch
+                    {
+                        RunnerActionStatus.Busy => RunnerStatus.Busy,
+                        RunnerActionStatus.Ready => RunnerStatus.Ready,
+                        _ => RunnerStatus.Starting
+                    };
                 }
                 else if (runner.VagrantReplica != null && runner.RunnerAction == null)
                 {
