@@ -218,7 +218,14 @@ public class VagrantService(ILogger<VagrantService> logger)
                             _logger.LogDebug("{x}", stdOut.Text);
                             break;
                         case StandardErrorCommandEvent stdErr:
-                            _logger.LogError("{x}", stdErr.Text);
+                            if (retries > ResilienceRetries)
+                            {
+                                _logger.LogError("{x}", stdErr.Text);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("{x}", stdErr.Text);
+                            }
                             break;
                         case ExitedCommandEvent exited:
                             var msg = $"vagrant up ended with return code {exited.ExitCode}";
