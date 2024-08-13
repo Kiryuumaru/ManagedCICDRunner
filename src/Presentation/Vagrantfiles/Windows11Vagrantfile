@@ -4,45 +4,64 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", inline: <<-SHELL
 
     # Install git
-    Invoke-WebRequest "https://github.com/git-for-windows/git/releases/download/v2.45.2.windows.1/MinGit-2.45.2-64-bit.zip" -OutFile "$env:TEMP\\mingit.zip" -UseBasicParsing;
-    $git_sha256 = '7ed2a3ce5bbbf8eea976488de5416894ca3e6a0347cee195a7d768ac146d5290';
-    if ((Get-FileHash "$env:TEMP\\mingit.zip" -Algorithm sha256).Hash -ne $git_sha256) {
-      Write-Host 'CHECKSUM VERIFICATION FAILED!';
+    $GIT_VERSION = "2.45.2"
+    Invoke-WebRequest "https://github.com/git-for-windows/git/releases/download/v${GIT_VERSION}.windows.1/MinGit-${GIT_VERSION}-64-bit.zip" -OutFile "${env:TEMP}\\mingit.zip" -UseBasicParsing;
+    $GIT_SHA256 = '7ed2a3ce5bbbf8eea976488de5416894ca3e6a0347cee195a7d768ac146d5290';
+    if ((Get-FileHash "${env:TEMP}\\mingit.zip" -Algorithm sha256).Hash -ne $GIT_SHA256) {
+      Write-Host 'GIT_SHA256 CHECKSUM VERIFICATION FAILED!';
       exit 1;
     };
-    Expand-Archive "$env:TEMP\\mingit.zip" -DestinationPath c:\\mingit;
+    Expand-Archive "${env:TEMP}\\mingit.zip" -DestinationPath c:\\mingit -Force;
     $env:PATH = $env:PATH + ";C:\\mingit\\cmd\\;C:\\mingit\\cmd";
     Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
     
     # Install gh-cli
-    Invoke-WebRequest "https://github.com/cli/cli/releases/download/v2.54.0/gh_2.54.0_windows_amd64.zip" -OutFile "$env:TEMP\\gh-cli.zip" -UseBasicParsing;
-    $gh_cli_sha256 = 'd3400b7e5c5a7f3912e8da606a2daf3376981d49f0ba0dea0337725eae25351d';
-    if ((Get-FileHash "$env:TEMP\\gh-cli.zip" -Algorithm sha256).Hash -ne $gh_cli_sha256) {
-      Write-Host 'CHECKSUM VERIFICATION FAILED!';
+    $GH_VERSION = "2.54.0"
+    Invoke-WebRequest "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_windows_amd64.zip" -OutFile "${env:TEMP}\\gh-cli.zip" -UseBasicParsing;
+    $GH_SHA256 = 'd3400b7e5c5a7f3912e8da606a2daf3376981d49f0ba0dea0337725eae25351d';
+    if ((Get-FileHash "${env:TEMP}\\gh-cli.zip" -Algorithm sha256).Hash -ne $GH_SHA256) {
+      Write-Host 'GH_SHA256 CHECKSUM VERIFICATION FAILED!';
       exit 1;
     };
-    Expand-Archive "$env:TEMP\\gh-cli.zip" -DestinationPath c:\\gh-cli;
+    Expand-Archive "${env:TEMP}\\gh-cli.zip" -DestinationPath c:\\gh-cli -Force;
     $env:PATH = $env:PATH + ";C:\\gh-cli\\bin\\;C:\\gh-cli\\bin";
     Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
     
     # Install docker
-    $env:DOCKER_RELEASE = 161083
-    Invoke-WebRequest "https://desktop.docker.com/win/main/amd64/$env:DOCKER_RELEASE/Docker%20Desktop%20Installer.exe" -OutFile "$env:TEMP\\docker-installer.exe" -UseBasicParsing;
-    $docker_sha256 = 'ceaa6e6bad893685aa4c49d1d3b456cd7241731bfed4d61fde1e961673a175ce';
-    if ((Get-FileHash "$env:TEMP\\docker-installer.exe" -Algorithm sha256).Hash -ne $docker_sha256) {
-      Write-Host 'CHECKSUM VERIFICATION FAILED!';
+    $DOCKER_VERSION = "27.1.1"
+    Enable-WindowsOptionalFeature -Online -FeatureName $("Microsoft-Hyper-V", "Containers") -All -NoRestart
+    Invoke-WebRequest "https://download.docker.com/win/static/stable/x86_64/docker-${DOCKER_VERSION}.zip" -OutFile "${env:TEMP}\\docker-static.zip" -UseBasicParsing;
+    $DOCKER_SHA256 = '978d3ba0f8440173469580f9c17f44fe28fcef3a59ab87c32d42a2d9a2853c26';
+    if ((Get-FileHash "${env:TEMP}\\docker-static.zip" -Algorithm sha256).Hash -ne $DOCKER_SHA256) {
+      Write-Host 'DOCKER_SHA256 CHECKSUM VERIFICATION FAILED!';
       exit 1;
     };
-    Start-Process "$env:TEMP\\docker-installer.exe" -NoNewWindow -Wait -ArgumentList 'install', '--accept-license', '--always-run-service'
+    Expand-Archive "${env:TEMP}\\docker-static.zip" -DestinationPath "${env:TEMP}\\docker-static" -Force;
+    xcopy "${env:TEMP}\\docker-static\\docker" "C:\\docker" /h /i /c /k /e /r /y
+    $DOCKER_DATA_PATH = "$($env:ProgramData)\\docker"
+    $DOCKER_CONFIG_PATH = Join-Path $DOCKER_DATA_PATH "config"
+    [System.IO.Directory]::CreateDirectory($DOCKER_CONFIG_PATH)
+    $DOCKER_DAEMON_SETTINGS = New-Object PSObject
+    $DOCKER_DAEMON_SETTINGS | Add-Member NoteProperty hosts @("npipe://")
+    $DOCKER_DAEMON_SETTINGS | ConvertTo-Json | Out-File -FilePath (Join-Path $DOCKER_CONFIG_PATH "daemon.json") -Encoding ASCII
+    & "C:\\docker\\dockerd.exe" --register-service --service-name docker
+    $env:PATH = $env:PATH + ";C:\\docker\\;C:\\docker";
+    Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
+    # Start-Service -Name docker
     
     # Install az-cli
-    $env:AZCLI_VERSION = 2.51.0
-    Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-$env:AZCLI_VERSION-x64.msi" -OutFile "$env:TEMP\\az-cli.msi" -UseBasicParsing;
-    Start-Process msiexec.exe -NoNewWindow -Wait -ArgumentList '/i', "$env:TEMP\\az-cli.msi", '/quiet', '/norestart'
+    $AZCLI_VERSION = 2.51.0
+    Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
+    $AZCLI_SHA256 = '80ba0df4eb7007a9b18f46308f5d6a3f4b54f84aaa5d4f0727a0adcaae3dbd8c';
+    if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_SHA256) {
+      Write-Host 'AZCLI_SHA256 CHECKSUM VERIFICATION FAILED!';
+      exit 1;
+    };
+    Start-Process msiexec.exe -NoNewWindow -Wait -ArgumentList '/i', "${env:TEMP}\\az-cli.msi", '/quiet', '/norestart'
     
     # Install Visual Studio
-    Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "$env:TEMP\\vs_community.exe" -UseBasicParsing;
-    & "$env:TEMP\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller --includeRecommended `
+    Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${env:TEMP}\\vs_community.exe" -UseBasicParsing;
+    & "${env:TEMP}\\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller --includeRecommended `
       --add Microsoft.VisualStudio.Workload.Azure `
       --add Microsoft.VisualStudio.Workload.Data `
       --add Microsoft.VisualStudio.Workload.DataScience `

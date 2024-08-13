@@ -66,6 +66,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
 
         await Cli.RunListenAndLog(_logger, $"vagrant up", boxPath, stoppingToken: cancellationToken);
+        await Cli.RunListenAndLog(_logger, $"vagrant reload", boxPath, stoppingToken: cancellationToken);
         await Cli.RunListenAndLog(_logger, $"vagrant package --output \"{packageBoxPath}\"", boxPath, stoppingToken: cancellationToken);
         await Cli.RunListenAndLog(_logger, $"vagrant box add {packageBoxPath} --name {buildId} -f", boxPath, stoppingToken: cancellationToken);
         await Cli.RunListenAndLog(_logger, $"vagrant destroy -f", boxPath, stoppingToken: cancellationToken);

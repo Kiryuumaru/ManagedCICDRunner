@@ -1,5 +1,6 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
+  config.vm.communicator = "ssh"
   config.vm.provision "shell", inline: <<-SHELL
 
     apt-get update
@@ -55,16 +56,6 @@ Vagrant.configure("2") do |config|
     apt-get update
     apt-get install -y docker-ce=$DOCKER_VERSION-1~$(lsb_release -is).$(lsb_release -rs)~$(lsb_release -cs)
     rm -rf /var/lib/apt/lists/*
-    
-    # Install .NET
-    DOTNET_VERSION=8.0.300
-    curl -fSL --output /tmp/dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_VERSION/dotnet-sdk-$DOTNET_VERSION-linux-x64.tar.gz
-    dotnet_sha512='6ba966801ad3869275469b0f7ee7af0b88b659d018a37b241962335bd95ef6e55cb6741ab77d96a93c68174d30d0c270b48b3cda21b493270b0d6038ee3fe79e'
-    echo "$dotnet_sha512 /tmp/dotnet.tar.gz" | sha512sum -c -
-    mkdir -p /usr/share/dotnet
-    tar -zxf /tmp/dotnet.tar.gz -C /usr/share/dotnet
-    rm /tmp/dotnet.tar.gz
-    ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 
     # Install AZ CLI
     AZCLI_VERSION=2.51.0
@@ -75,6 +66,16 @@ Vagrant.configure("2") do |config|
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(lsb_release -cs)
     rm -rf /var/lib/apt/lists/*
+    
+    # Install .NET
+    DOTNET_VERSION=8.0.300
+    curl -fSL --output /tmp/dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_VERSION/dotnet-sdk-$DOTNET_VERSION-linux-x64.tar.gz
+    dotnet_sha512='6ba966801ad3869275469b0f7ee7af0b88b659d018a37b241962335bd95ef6e55cb6741ab77d96a93c68174d30d0c270b48b3cda21b493270b0d6038ee3fe79e'
+    echo "$dotnet_sha512 /tmp/dotnet.tar.gz" | sha512sum -c -
+    mkdir -p /usr/share/dotnet
+    tar -zxf /tmp/dotnet.tar.gz -C /usr/share/dotnet
+    rm /tmp/dotnet.tar.gz
+    ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 
   SHELL
 end
