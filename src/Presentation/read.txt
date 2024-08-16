@@ -1,5 +1,22 @@
 
 
+
+
+vagrant destroy -f
+vagrant up --provider hyperv
+vagrant reload
+
+
+
+vagrant ssh
+
+
+
+docker run hello-world:nanoserver-ltsc2022
+
+
+
+
 docker -H "npipe:////./pipe/docker_engine_linux" build -t "trylinux:test" -f "./Dockerfiles/LinuxDockerfile" .
 docker -H "npipe:////./pipe/docker_engine_linux" run --name "trylinux" --cpus="4" --memory="8g" -it --rm "trylinux:test" /bin/bash
 

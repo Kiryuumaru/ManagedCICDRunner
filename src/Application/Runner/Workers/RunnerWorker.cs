@@ -37,27 +37,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly ILogger<RunnerWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    private readonly static AbsolutePath HostAssetsDir = Defaults.DataPath / "host-assets";
-    private readonly static AbsolutePath LinuxHostAssetsDir = HostAssetsDir / "linux";
-    private readonly static AbsolutePath WindowsHostAssetsDir = HostAssetsDir / "windows";
-    private readonly static AbsolutePath LinuxActionsRunner = LinuxHostAssetsDir / "actions-runner-linux-x64.tar.gz";
-    private readonly static AbsolutePath WindowsActionsRunner = WindowsHostAssetsDir / "actions-runner-win-x64.zip";
-
-    private readonly static (RunnerOSType OS, string Url, string Hash, AbsolutePath Path)[] HostAssetMatrix =
-    [
-        (
-            RunnerOSType.Linux,
-            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz",
-            "9e883d210df8c6028aff475475a457d380353f9d01877d51cc01a17b2a91161d",
-            LinuxActionsRunner
-        ), (
-            RunnerOSType.Windows,
-            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-win-x64-2.317.0.zip",
-            "a74dcd1612476eaf4b11c15b3db5a43a4f459c1d3c1807f8148aeb9530d69826",
-            WindowsActionsRunner
-        )
-    ];
-
     private readonly ExecutorLocker executorLocker = new();
 
     private readonly Dictionary<string, RunnerRuntime> runnerRuntimeMap = [];
@@ -92,37 +71,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
-
-        _logger.LogDebug("Fetching common assets...");
-        List<Task> commonAssetsTasks = [];
-        foreach (var (os, url, hash, actionRunnersPath) in HostAssetMatrix)
-        {
-            commonAssetsTasks.Add(Task.Run(async () =>
-            {
-                while (!actionRunnersPath.FileExists() || !FileHasher.GetFileHash(actionRunnersPath).Equals(hash, StringComparison.InvariantCultureIgnoreCase))
-                {
-                    _logger.LogInformation("Downloading common asset {}...", url);
-                    try
-                    {
-                        actionRunnersPath.Parent.CreateDirectory();
-                        if (actionRunnersPath.FileExists())
-                        {
-                            actionRunnersPath.DeleteFile();
-                        }
-                        using var s = await httpClient.GetStreamAsync(url, stoppingToken);
-                        using var fs = new FileStream(actionRunnersPath, FileMode.OpenOrCreate);
-                        await s.CopyToAsync(fs, stoppingToken);
-                        _logger.LogInformation("Downloading common asset {} done", url);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError("Downloading common asset {} error: {}", url, ex);
-                        await Task.Delay(2000, stoppingToken);
-                    }
-                }
-            }, stoppingToken));
-        }
-        await Task.WhenAll(commonAssetsTasks);
 
         _logger.LogDebug("Fetching runner token entities from service...");
         var runnerTokenEntityMap = (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow();
@@ -596,27 +544,33 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                     _logger.LogInformation("Runner preparing: {id}", replicaId);
 
-                    AbsolutePath hostAssetsDir;
                     string bootstrapInputScript;
                     if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                     {
-                        hostAssetsDir = LinuxHostAssetsDir;
-                        bootstrapInputScript = $"""
-                            mkdir "/runner"
-                            cd "/runner"
-                            cp /vagrant/assets/actions-runner-linux-x64.tar.gz ./actions-runner-linux-x64.tar.gz
-                            tar xzf ./actions-runner-linux-x64.tar.gz
+                        bootstrapInputScript = $$"""
+                            mkdir "/r"
+                            cd "/r"                
+                            RUNNER_VERSION=2.317.0
+                            curl -fSL --output /tmp/actions-runner-linux-x64.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
+                            RUNNER_SHA256='9e883d210df8c6028aff475475a457d380353f9d01877d51cc01a17b2a91161d'
+                            echo "$RUNNER_SHA256 /tmp/actions-runner-linux-x64.tar.gz" | sha256sum -c -
+                            tar -xzf /tmp/actions-runner-linux-x64.tar.gz -C /r
                             ./bin/installdependencies.sh
                             """;
                     }
                     else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                     {
-                        hostAssetsDir = WindowsHostAssetsDir;
-                        bootstrapInputScript = $"""
-                            mkdir "C:\runner"
-                            cd "C:\runner"
-                            Copy-Item "C:\vagrant\assets\actions-runner-win-x64.zip" -Destination "$PWD\actions-runner-win-x64.zip"
-                            Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD\actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
+                        bootstrapInputScript = $$"""
+                            mkdir "C:\\r"
+                            cd "C:\\r"
+                            $RUNNER_VERSION = "2.317.0"
+                            Invoke-WebRequest "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-win-x64-${RUNNER_VERSION}.zip" -OutFile "${env:TEMP}\\actions-runner-win-x64.zip" -UseBasicParsing;
+                            $RUNNER_SHA256 = 'a74dcd1612476eaf4b11c15b3db5a43a4f459c1d3c1807f8148aeb9530d69826';
+                            if ((Get-FileHash "${env:TEMP}\\actions-runner-win-x64.zip" -Algorithm sha256).Hash -ne $RUNNER_SHA256) {
+                              Write-Host 'RUNNER_SHA256 CHECKSUM VERIFICATION FAILED!';
+                              exit 1;
+                            };
+                            Expand-Archive "${env:TEMP}\\actions-runner-win-x64.zip" -DestinationPath c:\\r -Force;
                             """;
                     }
                     else
@@ -636,7 +590,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
                         tokenResponse.ThrowIfErrorOrHasNoValue();
                         string regToken = tokenResponse.Value["token"];
-                        string inputArgs = $"--name {replicaId} --url {GetConfigUrl(runnerToken)} --ephemeral --unattended --token {regToken}";
+                        string inputArgs = $"--name {replicaId} --url {GetConfigUrl(runnerToken)} --disableupdate --ephemeral --unattended --token {regToken}";
                         if (runnerRuntime.RunnerEntity.Labels.Length != 0)
                         {
                             inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
@@ -650,7 +604,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
                                 export RUNNER_ALLOW_RUNASROOT=1
-                                cd "/runner"
+                                cd "/r"
                                 sudo -E ./config.sh {inputArgs}
                                 sudo -E ./run.sh
                                 sudo shutdown -h now
@@ -661,7 +615,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
                                 $ErrorActionPreference='Stop'; $verbosePreference='Continue'
                                 $env:RUNNER_ALLOW_RUNASROOT=1
-                                cd "C:\runner"
+                                cd "C:\r"
                                 ./config.cmd {inputArgs}
                                 ./run.cmd
                                 shutdown /s /f
@@ -686,7 +640,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     building[replicaId] = runnerRuntime.Runners[replicaId];
                                     try
                                     {
-                                        await vagrantService.Build(baseVagrantBuildId, rev, baseVagrantfile, [], stoppingToken);
+                                        await vagrantService.Build(baseVagrantBuildId, rev, baseVagrantfile, stoppingToken);
                                     }
                                     catch
                                     {
@@ -699,7 +653,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, rev, bootstrapInputScript, [hostAssetsDir], stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, rev, bootstrapInputScript, stoppingToken);
                                     }
                                     catch
                                     {
@@ -710,6 +664,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         catch { }
                                         throw;
                                     }
+
+                                    _logger.LogInformation("Runner starting OS: {id}", replicaId);
 
                                     await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
 
@@ -724,7 +680,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         }
                                         catch (Exception ex)
                                         {
-                                            _logger.LogError("Runner rev execute error: {ex}", ex.Message);
+                                            _logger.LogError("Runner rev execute error on {}: {ex}", replicaId, ex.Message);
                                         }
                                         finally
                                         {
@@ -736,7 +692,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError("Runner rev run error: {ex}", ex.Message);
+                                _logger.LogError("Runner rev run error on {}: {ex}", replicaId, ex.Message);
                                 runnerRuntime.Runners.Remove(replicaId);
                             }
                             finally
@@ -748,7 +704,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogInformation("Runner rev init error: {ex}", ex.Message);
+                        _logger.LogError("Runner rev init error on {}: {ex}", replicaId, ex.Message);
                         runnerRuntime.Runners.Remove(replicaId);
                     }
                 }

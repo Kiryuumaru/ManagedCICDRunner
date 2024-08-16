@@ -18,7 +18,7 @@ public class BaseApplication : ApplicationDependency
         services.AddTransient<LocalStoreService>();
         services.AddSingleton<LocalStoreConcurrencyService>();
 
-        services.AddScoped<VagrantService>();
+        services.AddSingleton<VagrantService>();
 
         services.AddScoped<RunnerService>();
         services.AddScoped<RunnerTokenService>();

@@ -1,6 +1,11 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "gusztavvargadr/windows-11"
   config.vm.communicator = "winrm"
+  config.vm.synced_folder ".", "C:\\vagrant", disabled: true
+  config.vm.network "public_network", bridge: "Default Switch"
+  config.vm.provider "hyperv" do |hv|
+    hv.enable_virtualization_extensions = true
+  end
   config.vm.provision "shell", inline: <<-SHELL
 
     # Install git
@@ -29,7 +34,7 @@ Vagrant.configure("2") do |config|
     
     # Install docker
     $DOCKER_VERSION = "27.1.1"
-    Enable-WindowsOptionalFeature -Online -FeatureName $("Microsoft-Hyper-V", "Containers") -All -NoRestart
+    Enable-WindowsOptionalFeature -Online -FeatureName $("Microsoft-Hyper-V", "Containers", "VirtualMachinePlatform") -All -NoRestart
     Invoke-WebRequest "https://download.docker.com/win/static/stable/x86_64/docker-${DOCKER_VERSION}.zip" -OutFile "${env:TEMP}\\docker-static.zip" -UseBasicParsing;
     $DOCKER_SHA256 = '978d3ba0f8440173469580f9c17f44fe28fcef3a59ab87c32d42a2d9a2853c26';
     if ((Get-FileHash "${env:TEMP}\\docker-static.zip" -Algorithm sha256).Hash -ne $DOCKER_SHA256) {
@@ -47,12 +52,11 @@ Vagrant.configure("2") do |config|
     & "C:\\docker\\dockerd.exe" --register-service --service-name docker
     $env:PATH = $env:PATH + ";C:\\docker\\;C:\\docker";
     Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-    # Start-Service -Name docker
     
     # Install az-cli
     $AZCLI_VERSION = 2.51.0
     Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
-    $AZCLI_SHA256 = '80ba0df4eb7007a9b18f46308f5d6a3f4b54f84aaa5d4f0727a0adcaae3dbd8c';
+    $AZCLI_SHA256 = 'ded0e2fbbae52016239c899e7334785726be0e48671c018ee918fca8f62c1ea5';
     if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_SHA256) {
       Write-Host 'AZCLI_SHA256 CHECKSUM VERIFICATION FAILED!';
       exit 1;
