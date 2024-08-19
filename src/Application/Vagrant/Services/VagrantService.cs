@@ -8,6 +8,7 @@ using Domain.Vagrant.Enums;
 using Domain.Vagrant.Models;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
@@ -138,17 +139,23 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task<VagrantBuild[]> GetBuilds(CancellationToken cancellationToken)
     {
-        List<VagrantBuild> vagrantBuilds = [];
+        ConcurrentBag<VagrantBuild> vagrantBuilds = [];
+        List<Task> tasks = [];
 
         foreach (var dir in BuildPath.GetDirectories())
         {
-            var build = await GetBuild(dir.Name, cancellationToken);
-
-            if (build != null)
+            tasks.Add(Task.Run(async () =>
             {
-                vagrantBuilds.Add(build);
-            }
+                var build = await GetBuild(dir.Name, cancellationToken);
+
+                if (build != null)
+                {
+                    vagrantBuilds.Add(build);
+                }
+            }, cancellationToken));
         }
+
+        await Task.WhenAll(tasks);
 
         return [.. vagrantBuilds];
     }
@@ -305,10 +312,10 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             try
             {
-                CancellationTokenSource ctsTs = new(TimeSpan.FromSeconds(30));
+                var ct = cancellationToken.WithTimeout(TimeSpan.FromSeconds(30));
                 await Task.Run(async () =>
                 {
-                    await foreach (var cmdEvent in Cli.RunListen("vagrant", [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, stoppingToken: cancellationToken))
+                    await foreach (var cmdEvent in Cli.RunListen("vagrant", [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, stoppingToken: ct))
                     {
                         switch (cmdEvent)
                         {
@@ -331,7 +338,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                                 break;
                         }
                     }
-                }, ctsTs.Token);
+                }, ct);
             }
             catch (OperationCanceledException) { }
             catch (Exception)
@@ -405,17 +412,23 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task<VagrantReplica[]> GetReplicas(CancellationToken cancellationToken)
     {
-        List<VagrantReplica> vagrantReplicas = [];
+        ConcurrentBag<VagrantReplica> vagrantReplicas = [];
+        List<Task> tasks = [];
 
         foreach (var dir in ReplicaPath.GetDirectories())
         {
-            var replica = await GetReplica(dir.Name, cancellationToken);
-
-            if (replica != null)
+            tasks.Add(Task.Run(async () =>
             {
-                vagrantReplicas.Add(replica);
-            }
+                var replica = await GetReplica(dir.Name, cancellationToken);
+
+                if (replica != null)
+                {
+                    vagrantReplicas.Add(replica);
+                }
+            }, cancellationToken));
         }
+
+        await Task.WhenAll(tasks);
 
         return [.. vagrantReplicas];
     }
@@ -438,7 +451,7 @@ public class VagrantService(ILogger<VagrantService> logger)
     }
 
     public async Task DeleteCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
-    {
+        {
         try
         {
             var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: cancellationToken);
