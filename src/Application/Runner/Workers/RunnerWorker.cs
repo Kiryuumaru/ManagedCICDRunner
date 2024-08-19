@@ -466,7 +466,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     return;
                 }
                 var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
-                if (runnerRuntime == null || vagrantBuild.Rev != $"{runnerRuntime.TokenRev}-{runnerRuntime.RunnerRev}")
+                if (runnerRuntime == null)
                 {
                     await vagrantService.DeleteBuild(vagrantBuild.Id, stoppingToken);
                     _logger.LogInformation("Runner vagrant build (dangling): {name}", vagrantBuild.Id);
@@ -640,7 +640,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     building[replicaId] = runnerRuntime.Runners[replicaId];
                                     try
                                     {
-                                        await vagrantService.Build(baseVagrantBuildId, rev, baseVagrantfile, stoppingToken);
+                                        await vagrantService.Build(baseVagrantBuildId, baseVagrantfile, stoppingToken);
                                     }
                                     catch
                                     {
@@ -653,7 +653,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, rev, bootstrapInputScript, stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, bootstrapInputScript, stoppingToken);
                                     }
                                     catch
                                     {
