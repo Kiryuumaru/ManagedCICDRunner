@@ -473,23 +473,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             deleteDanglingBuildsTasks.Add(Task.Run(async () =>
             {
-                bool delete = false;
-
-                if (vagrantBuild.VagrantFileHash == null)
+                string[] idSplit = vagrantBuild.Id.Split('-');
+                if (idSplit.Length < 3)
                 {
-                    delete = true;
-                }
-                else
-                {
-                    string[] idSplit = vagrantBuild.Id.Split('-');
-                    if (idSplit.Length >= 3)
-                    {
-                        var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
-                        delete = runnerRuntime == null;
-                    }
+                    return;
                 }
 
-                if (delete)
+                var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
+                if (runnerRuntime == null)
                 {
                     await vagrantService.DeleteBuild(vagrantBuild.Id, stoppingToken);
                     _logger.LogInformation("Runner vagrant build (dangling): {name}", vagrantBuild.Id);

@@ -220,7 +220,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             catch { }
             try
             {
-                await Cli.RunListenAndLog(_logger, "vagrant", ["box", "remove", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
+                await Cli.RunOnce("vagrant", ["box", "remove", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
             }
             catch { }
         });
@@ -476,6 +476,13 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
         catch { }
 
+        await DeleteVagrant(dir, cancellationToken);
+
+        dir.DeleteDirectory();
+    }
+
+    public async Task DeleteVagrant(AbsolutePath dir, CancellationToken cancellationToken)
+    {
         await foreach (var cmdEvent in Cli.RunListen("vagrant", ["destroy", "-f"], dir, stoppingToken: cancellationToken))
         {
             switch (cmdEvent)
@@ -484,7 +491,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                     _logger.LogDebug("{x}", stdOut.Text);
                     break;
                 case StandardErrorCommandEvent stdErr:
-                    _logger.LogError("{x}", stdErr.Text);
+                    _logger.LogDebug("{x}", stdErr.Text);
                     break;
                 case ExitedCommandEvent exited:
                     var msg = $"vagrant destroy -f ended with return code {exited.ExitCode}";
@@ -499,8 +506,6 @@ public class VagrantService(ILogger<VagrantService> logger)
                     break;
             }
         }
-
-        dir.DeleteDirectory();
     }
 
     public async Task DeleteVMCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
