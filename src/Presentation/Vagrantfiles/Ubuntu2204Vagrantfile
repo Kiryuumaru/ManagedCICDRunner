@@ -82,11 +82,22 @@ Vagrant.configure("2") do |config|
     tar -zxf /tmp/dotnet.tar.gz -C /usr/share/dotnet
     rm /tmp/dotnet.tar.gz
     ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+    # Install Miniconda
+    export MINICONDA3_DIR="/usr/local/miniconda3"
+    mkdir -p $MINICONDA3_DIR
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $MINICONDA3_DIR/miniconda.sh
+    bash $MINICONDA3_DIR/miniconda.sh -b -u -p $MINICONDA3_DIR
+    rm -rf $MINICONDA3_DIR/miniconda.sh
+    echo ". $MINICONDA3_DIR/etc/profile.d/conda.sh" | tee -a /etc/profile.d/conda.sh /root/.bashrc
+    echo 'export PATH=/usr/local/miniconda3/bin:$PATH' | tee -a /etc/profile.d/conda.sh /root/.bashrc
+    /usr/local/miniconda3/bin/conda init --system
     
     # Install NVM and node
+    NVM_VERSION=0.40.0
     export NVM_DIR="/usr/local/nvm"
     mkdir -p $NVM_DIR/versions
-    curl https://raw.githubusercontent.com/creationix/nvm/v0.40.0/install.sh | bash
+    curl https://raw.githubusercontent.com/creationix/nvm/v$NVM_VERSION/install.sh | bash
     . $NVM_DIR/nvm.sh
     nvm install 12
     nvm install 13
@@ -102,15 +113,6 @@ Vagrant.configure("2") do |config|
     echo "export NVM_DIR=$NVM_DIR" | tee -a /etc/profile.d/nvm.sh /root/.bashrc
     echo '. $NVM_DIR/nvm.sh' | tee -a  /etc/profile.d/nvm.sh /root/.bashrc
     echo 'nvm use 22' | tee -a  /etc/profile.d/nvm.sh /root/.bashrc
-
-    # Install Miniconda
-    export MINICONDA3_DIR="/usr/local/miniconda3"
-    mkdir -p $MINICONDA3_DIR
-    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $MINICONDA3_DIR/miniconda.sh
-    bash $MINICONDA3_DIR/miniconda.sh -b -u -p $MINICONDA3_DIR
-    rm -rf $MINICONDA3_DIR/miniconda.sh
-    echo ". $MINICONDA3_DIR/etc/profile.d/conda.sh" | tee -a /etc/profile.d/conda.sh /root/.bashrc
-    echo 'export PATH=/usr/local/miniconda3/bin:$PATH' | tee -a /etc/profile.d/conda.sh /root/.bashrc
     
   SHELL
 end

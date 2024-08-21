@@ -40,35 +40,28 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath packageBoxPath = boxPath / "package.box";
         AbsolutePath vagrantfilePath = boxPath / "Vagrantfile";
 
-        string? currentVagrantFileHash = null;
-        if (buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
-            buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
-            vagrantFileHashProp.ValueKind == JsonValueKind.String)
-        {
-            currentVagrantFileHash = vagrantFileHashProp.GetString()!;
-        }
-
-        string? vagrantFileHash = null;
-        if (vagrantfilePath.FileExists())
-        {
-            vagrantFileHash = GetHash(vagrantfilePath);
-        }
-
-        if (vagrantFileHash != null && vagrantFileHash == currentVagrantFileHash)
-        {
-            return;
-        }
-
         await locker.Execute(buildId, async () => {
 
-            if (vagrantfilePath.FileExists())
+            string? currentVagrantFileHash = null;
+            if (buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
+                buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
+                vagrantFileHashProp.ValueKind == JsonValueKind.String)
             {
-                await DeleteCore(boxPath, buildId, cancellationToken);
+                currentVagrantFileHash = vagrantFileHashProp.GetString()!;
             }
 
             await vagrantfilePath.WriteAllTextAsync(await vagrantfileFactory(boxPath), cancellationToken);
 
-            await Cli.RunListenAndLog(_logger, "vagrant", ["up", "--provider", "hyperv"], boxPath, stoppingToken: cancellationToken);
+            string vagrantFileHash = GetHash(vagrantfilePath);
+
+            if (vagrantFileHash == currentVagrantFileHash)
+            {
+                return;
+            }
+
+            await DeleteCore(boxPath, buildId, cancellationToken);
+
+            await Cli.RunListenAndLog(_logger, "vagrant", ["up", "--provider", "hyperv", "--provision"], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["reload"], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["package", "--output", packageBoxPath], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
@@ -78,7 +71,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             var buildObj = new
             {
                 id = buildId,
-                vagrantFileHash = GetHash(vagrantfilePath)
+                vagrantFileHash
             };
             await buildFilePath.WriteObjAsync(buildObj, cancellationToken: cancellationToken);
         });
