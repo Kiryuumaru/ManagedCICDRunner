@@ -47,7 +47,20 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine1, ex => _logger.LogError("Runner error: {msg}", ex.Message));
         return Task.CompletedTask;
+    }
+
+    private async Task Routine1(CancellationToken stoppingToken)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
+        var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
+        var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
+        var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
+
+        await Task.Delay(1000, stoppingToken);
     }
 
     private async Task Routine(CancellationToken stoppingToken)
@@ -460,13 +473,23 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             deleteDanglingBuildsTasks.Add(Task.Run(async () =>
             {
-                string[] idSplit = vagrantBuild.Id.Split('-');
-                if (idSplit.Length < 3)
+                bool delete = false;
+
+                if (vagrantBuild.VagrantFileHash == null)
                 {
-                    return;
+                    delete = true;
                 }
-                var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
-                if (runnerRuntime == null)
+                else
+                {
+                    string[] idSplit = vagrantBuild.Id.Split('-');
+                    if (idSplit.Length >= 3)
+                    {
+                        var runnerRuntime = runnerRuntimeMap.GetValueOrDefault(idSplit[2]);
+                        delete = runnerRuntime == null;
+                    }
+                }
+
+                if (delete)
                 {
                     await vagrantService.DeleteBuild(vagrantBuild.Id, stoppingToken);
                     _logger.LogInformation("Runner vagrant build (dangling): {name}", vagrantBuild.Id);

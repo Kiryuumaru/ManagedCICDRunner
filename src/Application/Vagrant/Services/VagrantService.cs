@@ -71,7 +71,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
             await vagrantfilePath.WriteAllTextAsync(vagrantfileContent, cancellationToken);
 
-            await Cli.RunListenAndLog(_logger, "vagrant", ["up", "--provider", "hyperv", "--provision"], boxPath, stoppingToken: cancellationToken);
+            await Cli.RunListenAndLog(_logger, "vagrant", ["up", "--provider", "hyperv"], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["reload"], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["package", "--output", packageBoxPath], boxPath, stoppingToken: cancellationToken);
             await Cli.RunListenAndLog(_logger, "vagrant", ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
@@ -96,8 +96,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             Id = buildId,
             VagrantFileHash = vagrantFileHash,
-            Rev = rev,
-            State = VagrantBuildState.Ready
+            Rev = rev
         };
     }
 
@@ -110,15 +109,18 @@ public class VagrantService(ILogger<VagrantService> logger)
     {
         return Build(buildId, rev, boxPath =>
         {
+            string vmGuest;
             string vmCommunicator;
             string vagrantSyncFolder;
             if (runnerOSType == RunnerOSType.Linux)
             {
+                vmGuest = ":linux";
                 vmCommunicator = "ssh";
                 vagrantSyncFolder = "/vagrant";
             }
             else if (runnerOSType == RunnerOSType.Windows)
             {
+                vmGuest = ":windows";
                 vmCommunicator = "winssh";
                 vagrantSyncFolder = "C:/vagrant";
             }
@@ -129,13 +131,14 @@ public class VagrantService(ILogger<VagrantService> logger)
             return Task.FromResult($"""
                 Vagrant.configure("2") do |config|
                   config.vm.box = "{baseBuildId}"
+                  config.vm.guest = {vmGuest}
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                   end
-                  config.vm.provision "shell", privileged: true, inline: <<-SHELL
+                  config.vm.provision "shell", inline: <<-SHELL
                     {inputScript}
                   SHELL
                 end
@@ -151,9 +154,8 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath buildFilePath = dir / "build.json";
 
         string buildId = id;
-        string buildVagrantFileHash = "";
-        string buildRev = "";
-        bool hasConfig = false;
+        string? buildVagrantFileHash = null;
+        string? buildRev = null;
 
         if (vagrantfilePath.FileExists() && packageBoxPath.FileExists() && buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
             buildJson.RootElement.TryGetProperty("id", out var idProp) &&
@@ -166,34 +168,13 @@ public class VagrantService(ILogger<VagrantService> logger)
             buildId = idProp.GetString()!;
             buildVagrantFileHash = vagrantFileHashProp.GetString()!;
             buildRev = revProp.GetString()!;
-            hasConfig = true;
         }
-
-        VagrantBuildState vagrantBuildState = VagrantBuildState.NotCreated;
-        try
-        {
-            VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
-            await locker.Execute(buildId, async () =>
-            {
-                vagrantReplicaState = await GetStateCore(dir, cancellationToken);
-            });
-            if (vagrantReplicaState == VagrantReplicaState.Running)
-            {
-                vagrantBuildState = VagrantBuildState.Building;
-            }
-            else if (hasConfig)
-            {
-                vagrantBuildState = VagrantBuildState.Ready;
-            }
-        }
-        catch { }
 
         return new()
         {
             Id = buildId,
             VagrantFileHash = buildVagrantFileHash,
-            Rev = buildRev,
-            State = vagrantBuildState,
+            Rev = buildRev
         };
     }
 
@@ -303,15 +284,18 @@ public class VagrantService(ILogger<VagrantService> logger)
     {
         return Run(buildId, replicaId, rev, replicaPath =>
         {
+            string vmGuest;
             string vmCommunicator;
             string vagrantSyncFolder;
             if (runnerOSType == RunnerOSType.Linux)
             {
+                vmGuest = ":linux";
                 vmCommunicator = "ssh";
                 vagrantSyncFolder = "/vagrant";
             }
             else if (runnerOSType == RunnerOSType.Windows)
             {
+                vmGuest = ":windows";
                 vmCommunicator = "winssh";
                 vagrantSyncFolder = "C:/vagrant";
             }
@@ -323,6 +307,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             return Task.FromResult($"""
                 Vagrant.configure("2") do |config|
                   config.vm.box = "{buildId}"
+                  config.vm.guest = {vmGuest}
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
@@ -331,6 +316,8 @@ public class VagrantService(ILogger<VagrantService> logger)
                     hv.memory = "{1024 * memoryGB}"
                     hv.cpus = "{cpus}"
                   end
+                  config.vm.provision "shell", inline: <<-SHELL
+                  SHELL
                 end
                 """);
         }, labels, cancellationToken);
