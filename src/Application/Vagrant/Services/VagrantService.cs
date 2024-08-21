@@ -97,6 +97,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             Id = buildId,
             VagrantFileHash = vagrantFileHash,
             Rev = rev,
+            State = VagrantBuildState.Ready
         };
     }
 
@@ -142,33 +143,57 @@ public class VagrantService(ILogger<VagrantService> logger)
         }, cancellationToken);
     }
 
-    public async Task<VagrantBuild?> GetBuild(string id, CancellationToken cancellationToken)
+    public async Task<VagrantBuild> GetBuild(string id, CancellationToken cancellationToken)
     {
         AbsolutePath dir = BuildPath / id;
         AbsolutePath packageBoxPath = dir / "package.box";
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath buildFilePath = dir / "build.json";
 
-        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson ||
-            !buildJson.RootElement.TryGetProperty("id", out var idProp) ||
-            !buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) ||
-            !buildJson.RootElement.TryGetProperty("rev", out var revProp) ||
-            idProp.ValueKind != JsonValueKind.String ||
-            vagrantFileHashProp.ValueKind != JsonValueKind.String ||
+        string buildId = id;
+        string buildVagrantFileHash = "";
+        string buildRev = "";
+        bool hasConfig = false;
+
+        if (vagrantfilePath.FileExists() && packageBoxPath.FileExists() && buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
+            buildJson.RootElement.TryGetProperty("id", out var idProp) &&
+            buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
+            buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
+            idProp.ValueKind != JsonValueKind.String &&
+            vagrantFileHashProp.ValueKind != JsonValueKind.String &&
             revProp.ValueKind != JsonValueKind.String)
         {
-            return null;
+            buildId = idProp.GetString()!;
+            buildVagrantFileHash = vagrantFileHashProp.GetString()!;
+            buildRev = revProp.GetString()!;
+            hasConfig = true;
         }
 
-        string buildId = idProp.GetString()!;
-        string buildVagrantFileHash = vagrantFileHashProp.GetString()!;
-        string buildRev = revProp.GetString()!;
+        VagrantBuildState vagrantBuildState = VagrantBuildState.NotCreated;
+        try
+        {
+            VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
+            await locker.Execute(buildId, async () =>
+            {
+                vagrantReplicaState = await GetStateCore(dir, cancellationToken);
+            });
+            if (vagrantReplicaState == VagrantReplicaState.Running)
+            {
+                vagrantBuildState = VagrantBuildState.Building;
+            }
+            else if (hasConfig)
+            {
+                vagrantBuildState = VagrantBuildState.Ready;
+            }
+        }
+        catch { }
 
         return new()
         {
             Id = buildId,
             VagrantFileHash = buildVagrantFileHash,
-            Rev = buildRev
+            Rev = buildRev,
+            State = vagrantBuildState,
         };
     }
 
@@ -181,12 +206,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             tasks.Add(Task.Run(async () =>
             {
-                var build = await GetBuild(dir.Name, cancellationToken);
-
-                if (build != null)
-                {
-                    vagrantBuilds.Add(build);
-                }
+                vagrantBuilds.Add(await GetBuild(dir.Name, cancellationToken));
             }, cancellationToken));
         }
 
@@ -200,12 +220,16 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath boxPath = BuildPath / id;
         AbsolutePath buildFilePath = boxPath / "build.json";
 
-        if (await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson)
-        {
-            return;
-        }
+        string buildId = id;
 
-        string buildId = buildJson.RootElement.GetProperty("id").GetString()!;
+        try
+        {
+            if (await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson)
+            {
+                buildId = buildJson.RootElement.GetProperty("id").GetString()!;
+            }
+        }
+        catch { }
 
         await locker.Execute(buildId, async () => {
             try
@@ -216,11 +240,6 @@ public class VagrantService(ILogger<VagrantService> logger)
             try
             {
                 await Cli.RunListenAndLog(_logger, "vagrant", ["box", "remove", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
-            }
-            catch { }
-            try
-            {
-                await boxPath.DeleteRecursively();
             }
             catch { }
         });
@@ -286,7 +305,6 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             string vmCommunicator;
             string vagrantSyncFolder;
-
             if (runnerOSType == RunnerOSType.Linux)
             {
                 vmCommunicator = "ssh";
@@ -410,38 +428,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
         await locker.Execute(replicaId, async () =>
         {
-            await foreach (var commandEvent in Cli.RunListen("vagrant", ["status", "--machine-readable"], dir, stoppingToken: cancellationToken))
-            {
-                string line = "";
-                switch (commandEvent)
-                {
-                    case StandardOutputCommandEvent outEvent:
-                        _logger.LogDebug("{x}", outEvent.Text);
-                        line = outEvent.Text;
-                        break;
-                    case StandardErrorCommandEvent errEvent:
-                        _logger.LogDebug("{x}", errEvent.Text);
-                        line = errEvent.Text;
-                        break;
-                }
-                if (!string.IsNullOrEmpty(line))
-                {
-                    string[] split = line.Split(',');
-                    if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        vagrantReplicaState = split[3].ToLowerInvariant() switch
-                        {
-                            "not_created" => VagrantReplicaState.NotCreated,
-                            "off" => VagrantReplicaState.Off,
-                            "poweroff" => VagrantReplicaState.Off,
-                            "stopping" => VagrantReplicaState.Off,
-                            "running" => VagrantReplicaState.Running,
-                            "starting" => VagrantReplicaState.Starting,
-                            _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
-                        };
-                    }
-                }
-            }
+            vagrantReplicaState = await GetStateCore(dir, cancellationToken);
         });
 
         return new()
@@ -548,6 +535,44 @@ public class VagrantService(ILogger<VagrantService> logger)
             await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: cancellationToken);
         }
         (dir / ".vagrant").DeleteDirectory();
+    }
+
+    private async Task<VagrantReplicaState> GetStateCore(AbsolutePath vagrantDir, CancellationToken cancellationToken)
+    {
+        VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
+        await foreach (var commandEvent in Cli.RunListen("vagrant", ["status", "--machine-readable"], vagrantDir, stoppingToken: cancellationToken))
+        {
+            string line = "";
+            switch (commandEvent)
+            {
+                case StandardOutputCommandEvent outEvent:
+                    _logger.LogDebug("{x}", outEvent.Text);
+                    line = outEvent.Text;
+                    break;
+                case StandardErrorCommandEvent errEvent:
+                    _logger.LogDebug("{x}", errEvent.Text);
+                    line = errEvent.Text;
+                    break;
+            }
+            if (!string.IsNullOrEmpty(line))
+            {
+                string[] split = line.Split(',');
+                if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    vagrantReplicaState = split[3].ToLowerInvariant() switch
+                    {
+                        "not_created" => VagrantReplicaState.NotCreated,
+                        "off" => VagrantReplicaState.Off,
+                        "poweroff" => VagrantReplicaState.Off,
+                        "stopping" => VagrantReplicaState.Off,
+                        "running" => VagrantReplicaState.Running,
+                        "starting" => VagrantReplicaState.Starting,
+                        _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
+                    };
+                }
+            }
+        }
+        return vagrantReplicaState;
     }
 
     private string GetHash(AbsolutePath filename)

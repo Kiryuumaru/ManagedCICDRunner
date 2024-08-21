@@ -41,8 +41,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     private readonly Dictionary<string, RunnerRuntime> runnerRuntimeMap = [];
 
-    private readonly ConcurrentDictionary<string, RunnerInstance> building = [];
-    private readonly ConcurrentDictionary<string, RunnerInstance> executing = [];
+    private readonly ConcurrentDictionary<string, RunnerInstance> buildingReplicaMap = [];
+    private readonly ConcurrentDictionary<string, RunnerInstance> executingReplicaMap = [];
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -302,8 +302,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         foreach (var vagrantReplica in vagrantReplicas.Values)
         {
             var (RunnerAction, RunnerTokenEntity) = runnerActionMap.GetValueOrDefault(vagrantReplica.Id);
-            if (!building.ContainsKey(vagrantReplica.Id) &&
-                !executing.ContainsKey(vagrantReplica.Id) &&
+            if (!buildingReplicaMap.ContainsKey(vagrantReplica.Id) &&
+                !executingReplicaMap.ContainsKey(vagrantReplica.Id) &&
                 (
                     vagrantReplica.State == VagrantReplicaState.Off ||
                     vagrantReplica.State == VagrantReplicaState.NotCreated ||
@@ -321,8 +321,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
         {
             var vagrantReplica = vagrantReplicas.GetValueOrDefault(RunnerAction.Name);
-            if (!building.ContainsKey(RunnerAction.Name) &&
-                !executing.ContainsKey(RunnerAction.Name) &&
+            if (!buildingReplicaMap.ContainsKey(RunnerAction.Name) &&
+                !executingReplicaMap.ContainsKey(RunnerAction.Name) &&
                 (
                     RunnerAction.Status == RunnerActionStatus.Offline ||
                     vagrantReplica == null ||
@@ -344,8 +344,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 if (vagrantReplicaToRemove.ContainsKey(runner.Name) ||
                     runnerActionsToRemove.ContainsKey(runner.Name) ||
                     (
-                        !building.ContainsKey(runner.Name) &&
-                        !executing.ContainsKey(runner.Name) &&
+                        !buildingReplicaMap.ContainsKey(runner.Name) &&
+                        !executingReplicaMap.ContainsKey(runner.Name) &&
                         (
                             runner.RunnerAction == null ||
                             runner.RunnerAction.Status == RunnerActionStatus.Offline ||
@@ -561,6 +561,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                     {
                         bootstrapInputScript = $$"""
+                            $ErrorActionPreference='Stop'; $verbosePreference='Continue'; $ProgressPreference = "SilentlyContinue"
                             mkdir "C:\\r"
                             cd "C:\\r"
                             $RUNNER_VERSION = "2.317.0"
@@ -613,7 +614,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
                             inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
-                                $ErrorActionPreference='Stop'; $verbosePreference='Continue'
+                                $ErrorActionPreference='Stop'; $verbosePreference='Continue'; $ProgressPreference = "SilentlyContinue"
                                 $env:RUNNER_ALLOW_RUNASROOT=1
                                 cd "C:\r"
                                 ./config.cmd {inputArgs}
@@ -634,10 +635,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             try
                             {
-                                building[replicaId] = runnerRuntime.Runners[replicaId];
+                                buildingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    building[replicaId] = runnerRuntime.Runners[replicaId];
                                     string baseRev;
                                     try
                                     {
@@ -667,7 +667,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         throw;
                                     }
 
-                                    executing[replicaId] = runnerRuntime.Runners[replicaId];
+                                    executingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
                                     async void execute()
                                     {
                                         try
@@ -700,7 +700,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         }
                                         finally
                                         {
-                                            executing.Remove(replicaId, out _);
+                                            executingReplicaMap.Remove(replicaId, out _);
                                         }
                                     }
                                     execute();
@@ -713,7 +713,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             }
                             finally
                             {
-                                building.Remove(replicaId, out _);
+                                buildingReplicaMap.Remove(replicaId, out _);
                             }
                         }
                         run();
