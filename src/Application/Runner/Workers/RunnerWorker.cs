@@ -638,9 +638,11 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
                                     building[replicaId] = runnerRuntime.Runners[replicaId];
+                                    string baseRev;
                                     try
                                     {
-                                        await vagrantService.Build(baseVagrantBuildId, baseVagrantfile, stoppingToken);
+                                        var baseBuild = await vagrantService.Build(baseVagrantBuildId, "base", baseVagrantfile, stoppingToken);
+                                        baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
                                     }
                                     catch
                                     {
@@ -653,7 +655,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, bootstrapInputScript, stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, bootstrapInputScript, stoppingToken);
                                     }
                                     catch
                                     {
