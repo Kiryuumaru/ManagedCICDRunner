@@ -16,7 +16,7 @@
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 		<PackageReference Include="ApplicationBuilderHelpers" Version="0.2.14" />
 		<PackageReference Include="CliWrap" Version="3.6.6" />
-		<PackageReference Include="RestfulHelpers" Version="1.7.39" />
+		<PackageReference Include="RestfulHelpers" Version="1.7.42" />
 	</ItemGroup>
 
 </Project>
