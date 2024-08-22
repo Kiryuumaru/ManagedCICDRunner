@@ -198,66 +198,6 @@ public class AbsolutePath
         await Task.Run(() => File.WriteAllTextAsync(Path, JsonSerializer.Serialize(obj, jsonSerializerOptions), cancellationToken), cancellationToken);
     }
 
-    public async Task LockFile(CancellationToken unlockToken)
-    {
-        Directory.CreateDirectory(Parent);
-        var fileLock = new FileStream(Path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        await fileLock.WriteAsync(Array.Empty<byte>(), unlockToken);
-        await fileLock.FlushAsync(unlockToken);
-        async void watchLock()
-        {
-            await unlockToken.WhenCanceled();
-            fileLock.Close();
-        }
-        watchLock();
-    }
-
-    public async Task ClaimFile(CancellationToken unclaimToken)
-    {
-        Directory.CreateDirectory(Parent);
-        Guid guid = Guid.NewGuid();
-        string guidStr = guid.ToString();
-        bool hasClaimed = false;
-        try
-        {
-            await File.WriteAllTextAsync(Path, guidStr, unclaimToken);
-            await Task.Delay(1000, unclaimToken);
-            var currentGuidStr = await File.ReadAllTextAsync(Path, unclaimToken);
-            if (currentGuidStr == guidStr)
-            {
-                hasClaimed = true;
-            }
-        }
-        catch { }
-        if (hasClaimed)
-        {
-            async void watchClaim()
-            {
-                while (!unclaimToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await File.WriteAllTextAsync(Path, guidStr, unclaimToken);
-                    }
-                    catch { }
-                    finally
-                    {
-                        try
-                        {
-                            await Task.Delay(250, unclaimToken);
-                        }
-                        catch { }
-                    }
-                }
-            }
-            watchClaim();
-        }
-        else
-        {
-            throw new Exception($"{Path} was already claimed.");
-        }
-    }
-
     public void CreateDirectory()
     {
         Directory.CreateDirectory(Path);

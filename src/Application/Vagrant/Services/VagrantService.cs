@@ -10,6 +10,8 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Reflection.Emit;
@@ -30,6 +32,7 @@ public class VagrantService(ILogger<VagrantService> logger)
     private static readonly AbsolutePath DataPath = Defaults.DataPath / "vagrant";
     private static readonly AbsolutePath BuildPath = DataPath / "build";
     private static readonly AbsolutePath ReplicaPath = DataPath / "replica";
+    private static readonly AbsolutePath TempPath = DataPath / "temp";
 
     private readonly ExecutorLocker locker = new();
 
@@ -37,37 +40,49 @@ public class VagrantService(ILogger<VagrantService> logger)
     {
         string? vagrantFileHash = null;
 
+        AbsolutePath boxPath = BuildPath / buildId;
+        AbsolutePath buildFilePath = boxPath / "build.json";
+        AbsolutePath packageBoxPath = boxPath / "package.box";
+        AbsolutePath vagrantfilePath = boxPath / "Vagrantfile";
+        AbsolutePath boxPathTemp = TempPath / $"{buildId}-{Guid.NewGuid()}";
+        AbsolutePath vagrantfilePathTemp = boxPathTemp / "Vagrantfile";
+
+        string? currentVagrantFileHash = null;
+        string? currentRev = null;
+        if (buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
+            buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
+            buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
+            vagrantFileHashProp.ValueKind == JsonValueKind.String &&
+            revProp.ValueKind == JsonValueKind.String)
+        {
+            currentVagrantFileHash = vagrantFileHashProp.GetString()!;
+            currentRev = revProp.GetString()!;
+        }
+
+        string vagrantfileContent = await vagrantfileFactory(boxPath);
+
+        await vagrantfilePathTemp.WriteAllTextAsync(vagrantfileContent, cancellationToken);
+        vagrantFileHash = GetHash(vagrantfilePathTemp);
+        await DeleteForce(boxPathTemp, cancellationToken);
+
+        VagrantBuild vagrantBuild = new()
+        {
+            Id = buildId,
+            VagrantFileHash = vagrantFileHash,
+            Rev = rev
+        };
+
+        if (vagrantFileHash == currentVagrantFileHash && currentRev == rev)
+        {
+            return vagrantBuild;
+        }
+
         await locker.Execute(buildId, async () => {
 
-            AbsolutePath boxPath = BuildPath / buildId;
-            AbsolutePath buildFilePath = boxPath / "build.json";
-            AbsolutePath packageBoxPath = boxPath / "package.box";
-            AbsolutePath vagrantfilePath = boxPath / "Vagrantfile";
-
-            string? currentVagrantFileHash = null;
-            string? currentRev = null;
-            if (buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
-                buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
-                buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
-                vagrantFileHashProp.ValueKind == JsonValueKind.String &&
-                revProp.ValueKind == JsonValueKind.String)
+            if (boxPath.DirectoryExists())
             {
-                currentVagrantFileHash = vagrantFileHashProp.GetString()!;
-                currentRev = revProp.GetString()!;
+                await DeleteCore(boxPath, buildId, cancellationToken);
             }
-
-            string vagrantfileContent = await vagrantfileFactory(boxPath);
-
-            await vagrantfilePath.WriteAllTextAsync(vagrantfileContent, cancellationToken);
-
-            vagrantFileHash = GetHash(vagrantfilePath);
-
-            if (vagrantFileHash == currentVagrantFileHash && currentRev == rev)
-            {
-                return;
-            }
-
-            await DeleteCore(boxPath, buildId, cancellationToken);
 
             await vagrantfilePath.WriteAllTextAsync(vagrantfileContent, cancellationToken);
 
@@ -87,17 +102,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             await buildFilePath.WriteObjAsync(buildObj, cancellationToken: cancellationToken);
         });
 
-        if (vagrantFileHash == null)
-        {
-            throw new Exception("vagrantFileHash is empty");
-        }
-
-        return new()
-        {
-            Id = buildId,
-            VagrantFileHash = vagrantFileHash,
-            Rev = rev
-        };
+        return vagrantBuild;
     }
 
     public Task<VagrantBuild> Build(string buildId, string rev, string vagrantfile, CancellationToken cancellationToken)
@@ -146,29 +151,27 @@ public class VagrantService(ILogger<VagrantService> logger)
         }, cancellationToken);
     }
 
-    public async Task<VagrantBuild> GetBuild(string id, CancellationToken cancellationToken)
+    public async Task<VagrantBuild?> GetBuild(string id, CancellationToken cancellationToken)
     {
         AbsolutePath dir = BuildPath / id;
         AbsolutePath packageBoxPath = dir / "package.box";
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath buildFilePath = dir / "build.json";
 
-        string buildId = id;
-        string? buildVagrantFileHash = null;
-        string? buildRev = null;
-
-        if (vagrantfilePath.FileExists() && packageBoxPath.FileExists() && buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
-            buildJson.RootElement.TryGetProperty("id", out var idProp) &&
-            buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
-            buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
-            idProp.ValueKind != JsonValueKind.String &&
-            vagrantFileHashProp.ValueKind != JsonValueKind.String &&
+        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson ||
+            !buildJson.RootElement.TryGetProperty("id", out var idProp) ||
+            !buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) ||
+            !buildJson.RootElement.TryGetProperty("rev", out var revProp) ||
+            idProp.ValueKind != JsonValueKind.String ||
+            vagrantFileHashProp.ValueKind != JsonValueKind.String ||
             revProp.ValueKind != JsonValueKind.String)
         {
-            buildId = idProp.GetString()!;
-            buildVagrantFileHash = vagrantFileHashProp.GetString()!;
-            buildRev = revProp.GetString()!;
+            return null;
         }
+
+        string buildId = idProp.GetString()!;
+        string buildVagrantFileHash = vagrantFileHashProp.GetString()!;
+        string buildRev = revProp.GetString()!;
 
         return new()
         {
@@ -178,22 +181,30 @@ public class VagrantService(ILogger<VagrantService> logger)
         };
     }
 
-    public async Task<VagrantBuild[]> GetBuilds(CancellationToken cancellationToken)
+    public async Task<Dictionary<string, VagrantBuild?>> GetBuilds(CancellationToken cancellationToken)
     {
-        ConcurrentBag<VagrantBuild> vagrantBuilds = [];
+        ConcurrentDictionary<string, VagrantBuild?> vagrantBuilds = [];
         List<Task> tasks = [];
 
         foreach (var dir in BuildPath.GetDirectories())
         {
             tasks.Add(Task.Run(async () =>
             {
-                vagrantBuilds.Add(await GetBuild(dir.Name, cancellationToken));
+                var vagrantBuild = await GetBuild(dir.Name, cancellationToken);
+                if (vagrantBuild == null)
+                {
+                    vagrantBuilds[dir.Name] = null;
+                }
+                else
+                {
+                    vagrantBuilds[vagrantBuild.Id] = vagrantBuild;
+                }
             }, cancellationToken));
         }
 
         await Task.WhenAll(tasks);
 
-        return [.. vagrantBuilds];
+        return vagrantBuilds.ToDictionary();
     }
 
     public async Task DeleteBuild(string id, CancellationToken cancellationToken)
@@ -212,7 +223,8 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
         catch { }
 
-        await locker.Execute(buildId, async () => {
+        await locker.Execute(buildId, async () =>
+        {
             try
             {
                 await DeleteCore(boxPath, $"{id}_default_", cancellationToken);
@@ -237,7 +249,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica already exists");
         }
 
-        await locker.Execute(replicaId, async () => {
+        await locker.Execute([buildId, replicaId], async () => {
             var replicaObj = new
             {
                 buildId,
@@ -428,9 +440,9 @@ public class VagrantService(ILogger<VagrantService> logger)
         };
     }
 
-    public async Task<VagrantReplica[]> GetReplicas(CancellationToken cancellationToken)
+    public async Task<Dictionary<string, VagrantReplica?>> GetReplicas(CancellationToken cancellationToken)
     {
-        ConcurrentBag<VagrantReplica> vagrantReplicas = [];
+        ConcurrentDictionary<string, VagrantReplica?> vagrantReplicas = [];
         List<Task> tasks = [];
 
         foreach (var dir in ReplicaPath.GetDirectories())
@@ -438,17 +450,20 @@ public class VagrantService(ILogger<VagrantService> logger)
             tasks.Add(Task.Run(async () =>
             {
                 var replica = await GetReplica(dir.Name, cancellationToken);
-
-                if (replica != null)
+                if (replica == null)
                 {
-                    vagrantReplicas.Add(replica);
+                    vagrantReplicas[dir.Name] = null;
+                }
+                else
+                {
+                    vagrantReplicas[replica.Id] = replica;
                 }
             }, cancellationToken));
         }
 
         await Task.WhenAll(tasks);
 
-        return [.. vagrantReplicas];
+        return vagrantReplicas.ToDictionary();
     }
 
     public async Task DeleteReplica(string id, CancellationToken cancellationToken)
@@ -457,13 +472,14 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath replicaFilePath = dir / "replica.json";
 
-        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists())
-        {
-            return;
-        }
-
         await locker.Execute(id, async () =>
         {
+            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists())
+            {
+                await DeleteForce(dir, cancellationToken);
+                return;
+            }
+
             await DeleteCore(dir, $"{id}_default_", cancellationToken);
         });
     }
@@ -476,9 +492,11 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
         catch { }
 
+        await WaitKillable(dir, cancellationToken);
+
         await DeleteVagrant(dir, cancellationToken);
 
-        dir.DeleteDirectory();
+        await DeleteForce(dir, cancellationToken);
     }
 
     public async Task DeleteVagrant(AbsolutePath dir, CancellationToken cancellationToken)
@@ -510,33 +528,43 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task DeleteVMCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
     {
-        var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(1));
-        var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
-        var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
-        string? vmId = null;
-        foreach (var prop in getVmJson.RootElement.EnumerateArray())
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var vmName = prop!.GetProperty("Name").GetString()!;
-            if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
+            try
             {
-                vmId = vmName;
-            }
-        }
-        if (vmId != null)
-        {
-            await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
-            await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
-            while (!ctxTimed.IsCancellationRequested)
-            {
-                var result = await Cli.BuildRun("powershell", ["Get-VM", "-Name", vmId], dir).ExecuteAsync(ctxTimed);
-                if (result.ExitCode != 0)
+                var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(2));
+                var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
+                var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
+                string? vmId = null;
+                foreach (var prop in getVmJson.RootElement.EnumerateArray())
                 {
-                    break;
+                    var vmName = prop!.GetProperty("Name").GetString()!;
+                    if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        vmId = vmName;
+                    }
                 }
-                await Task.Delay(5000, ctxTimed);
+                if (vmId != null)
+                {
+                    await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+                    await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+                    while (!ctxTimed.IsCancellationRequested)
+                    {
+                        var result = await Cli.BuildRun("powershell", ["Get-VM", "-Name", vmId], dir).ExecuteAsync(ctxTimed);
+                        if (result.ExitCode != 0)
+                        {
+                            break;
+                        }
+                        await Task.Delay(5000, ctxTimed);
+                    }
+                }
+                await DeleteForce(dir / ".vagrant", ctxTimed);
+            }
+            catch
+            {
+                _logger.LogWarning("Error on deleting {}. retrying...", id);
             }
         }
-        (dir / ".vagrant").DeleteDirectory();
     }
 
     private async Task<VagrantReplicaState> GetStateCore(AbsolutePath vagrantDir, CancellationToken cancellationToken)
@@ -583,5 +611,45 @@ public class VagrantService(ILogger<VagrantService> logger)
         using var stream = File.OpenRead(filename);
         var hash = sha512.ComputeHash(stream);
         return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+    }
+
+    private async Task DeleteForce(AbsolutePath path, CancellationToken cancellationToken)
+    {
+        await WaitKillable(path, cancellationToken);
+        await path.DeleteRecursively();
+    }
+
+    private async Task WaitKillable(AbsolutePath path, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var processes = await path.GetProcessRecursively();
+                if (processes.Count == 0)
+                {
+                    break;
+                }
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        if (!process.ProcessName.Equals("system", StringComparison.InvariantCultureIgnoreCase) &&
+                            !process.ProcessName.Equals("vmms", StringComparison.InvariantCultureIgnoreCase) &&
+                            !process.ProcessName.Equals("vmwp", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            process.Kill();
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            try
+            {
+                await Task.Delay(2000, cancellationToken);
+            }
+            catch { }
+        }
     }
 }

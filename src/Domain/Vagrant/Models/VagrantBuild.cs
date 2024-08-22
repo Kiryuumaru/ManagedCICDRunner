@@ -11,7 +11,7 @@ public class VagrantBuild
 {
     public required string Id { get; init; }
 
-    public required string? VagrantFileHash { get; init; }
+    public required string VagrantFileHash { get; init; }
 
-    public required string? Rev { get; init; }
+    public required string Rev { get; init; }
 }
