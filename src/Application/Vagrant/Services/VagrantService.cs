@@ -474,8 +474,6 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await locker.Execute(id, async () =>
         {
-            await WaitKillAll(dir, [], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
-
             await DeleteCore(dir, $"{id}_default_", cancellationToken);
         });
     }
@@ -539,21 +537,59 @@ public class VagrantService(ILogger<VagrantService> logger)
             try
             {
                 var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(2));
-                var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
-                var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
                 string? vmId = null;
-                foreach (var prop in getVmJson.RootElement.EnumerateArray())
+                try
                 {
-                    var vmName = prop!.GetProperty("Name").GetString()!;
-                    if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
+                    var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
+                    var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
+                    foreach (var prop in getVmJson.RootElement.EnumerateArray())
                     {
-                        vmId = vmName;
+                        var vmName = prop!.GetProperty("Name").GetString()!;
+                        if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            vmId = vmName;
+                        }
                     }
                 }
+                catch { }
                 if (vmId != null)
                 {
-                    await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
-                    await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+                    try
+                    {
+                        await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-TurnOff", "-Force"], dir, stoppingToken: ctxTimed);
+                    }
+                    catch { }
+                    while (!ctxTimed.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmId}\").State"], dir, stoppingToken: ctxTimed);
+                            if (result.Trim().Equals("off", StringComparison.InvariantCultureIgnoreCase))
+                            {
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
+                    try
+                    {
+                        await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+                    }
+                    catch { }
+                    while (!ctxTimed.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmId], dir, stoppingToken: ctxTimed);
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
                 }
 
                 var vagrantCreatedDir = dir / ".vagrant";

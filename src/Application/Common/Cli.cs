@@ -8,6 +8,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using TransactionHelpers;
 
 namespace Application.Common;
 
@@ -90,8 +91,13 @@ public static class Cli
     {
         var stdBuffer = new StringBuilder();
 
-        await BuildRun(path, args, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
+        var result = await BuildRun(path, args, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
             .ExecuteAsync(stoppingToken);
+
+        if (result.ExitCode != 0)
+        {
+            throw new Exception(stdBuffer.ToString());
+        }
 
         return stdBuffer.ToString();
     }
@@ -104,8 +110,13 @@ public static class Cli
     {
         var stdBuffer = new StringBuilder();
 
-        await BuildRun(command, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
+        var result = await BuildRun(command, workingDirectory, environmentVariables, null, PipeTarget.ToStringBuilder(stdBuffer), PipeTarget.ToStringBuilder(stdBuffer))
             .ExecuteAsync(stoppingToken);
+
+        if (result.ExitCode != 0)
+        {
+            throw new Exception(stdBuffer.ToString());
+        }
 
         return stdBuffer.ToString();
     }
