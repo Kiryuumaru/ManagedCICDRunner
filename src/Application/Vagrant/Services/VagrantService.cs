@@ -63,7 +63,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await vagrantfilePathTemp.WriteAllTextAsync(vagrantfileContent, cancellationToken);
         vagrantFileHash = GetHash(vagrantfilePathTemp);
-        await DeleteForce(boxPathTemp, cancellationToken);
+        await WaitKillAll(boxPathTemp, [], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
         VagrantBuild vagrantBuild = new()
         {
@@ -474,11 +474,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await locker.Execute(id, async () =>
         {
-            if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists())
-            {
-                await DeleteForce(dir, cancellationToken);
-                return;
-            }
+            await WaitKillAll(dir, [], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
             await DeleteCore(dir, $"{id}_default_", cancellationToken);
         });
@@ -486,17 +482,27 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task DeleteCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await DeleteVMCore(dir, id, cancellationToken);
+            try
+            {
+                await DeleteVMCore(dir, id, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+
+                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+
+                await DeleteVagrant(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+
+                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+
+                await dir.DeleteRecursively();
+
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Error on deleting {}: {}. retrying...", id, ex.Message);
+            }
         }
-        catch { }
-
-        await WaitKillable(dir, cancellationToken);
-
-        await DeleteVagrant(dir, cancellationToken);
-
-        await DeleteForce(dir, cancellationToken);
     }
 
     public async Task DeleteVagrant(AbsolutePath dir, CancellationToken cancellationToken)
@@ -548,21 +554,19 @@ public class VagrantService(ILogger<VagrantService> logger)
                 {
                     await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
                     await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
-                    while (!ctxTimed.IsCancellationRequested)
-                    {
-                        var result = await Cli.BuildRun("powershell", ["Get-VM", "-Name", vmId], dir).ExecuteAsync(ctxTimed);
-                        if (result.ExitCode != 0)
-                        {
-                            break;
-                        }
-                        await Task.Delay(5000, ctxTimed);
-                    }
                 }
-                await DeleteForce(dir / ".vagrant", ctxTimed);
+
+                var vagrantCreatedDir = dir / ".vagrant";
+
+                await WaitKill(vagrantCreatedDir, cancellationToken);
+                await vagrantCreatedDir.DeleteRecursively();
+
+                break;
             }
-            catch
+            catch (Exception ex)
             {
-                _logger.LogWarning("Error on deleting {}. retrying...", id);
+                _logger.LogDebug("Error on deleting VM {}: {}. retrying...", id, ex.Message);
+                _logger.LogWarning("Error on deleting VM {}. retrying...", id);
             }
         }
     }
@@ -613,13 +617,12 @@ public class VagrantService(ILogger<VagrantService> logger)
         return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 
-    private async Task DeleteForce(AbsolutePath path, CancellationToken cancellationToken)
+    private Task WaitKill(AbsolutePath path, CancellationToken cancellationToken)
     {
-        await WaitKillable(path, cancellationToken);
-        await path.DeleteRecursively();
+        return WaitKillAll(path, ["system", "vmms", "vmwp"], cancellationToken);
     }
 
-    private async Task WaitKillable(AbsolutePath path, CancellationToken cancellationToken)
+    private async Task WaitKillAll(AbsolutePath path, string[] procExceptions, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -634,9 +637,8 @@ public class VagrantService(ILogger<VagrantService> logger)
                 {
                     try
                     {
-                        if (!process.ProcessName.Equals("system", StringComparison.InvariantCultureIgnoreCase) &&
-                            !process.ProcessName.Equals("vmms", StringComparison.InvariantCultureIgnoreCase) &&
-                            !process.ProcessName.Equals("vmwp", StringComparison.InvariantCultureIgnoreCase))
+                        var procName = process.ProcessName;
+                        if (!procExceptions.Any(i => i.Equals(procName, StringComparison.InvariantCultureIgnoreCase)))
                         {
                             process.Kill();
                         }
@@ -647,7 +649,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             catch { }
             try
             {
-                await Task.Delay(2000, cancellationToken);
+                await Task.Delay(1000, cancellationToken);
             }
             catch { }
         }
