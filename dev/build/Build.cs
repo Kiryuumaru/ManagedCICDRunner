@@ -30,7 +30,7 @@ class Build : BaseNukeBuildHelpers
 
     public override string MainEnvironmentBranch { get; } = "master";
 
-    private static readonly string[] osMatrix = ["linux", "windows"];
+    private static readonly string[] osMatrix = ["windows"];
     private static readonly string[] archMatrix = ["x64", "arm64"];
 
     string GetVersion(IRunContext context)
