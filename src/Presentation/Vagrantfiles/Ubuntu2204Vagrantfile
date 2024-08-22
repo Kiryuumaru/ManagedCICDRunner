@@ -6,7 +6,6 @@ Vagrant.configure("2") do |config|
   config.vm.network "public_network", bridge: "Default Switch"
   config.vm.provider "hyperv" do |hv|
     hv.enable_virtualization_extensions = true
-    hv.differencing_disk = true
   end
   config.vm.provision "shell", inline: <<-SHELL
   
