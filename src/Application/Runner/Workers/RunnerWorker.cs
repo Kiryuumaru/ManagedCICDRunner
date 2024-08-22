@@ -628,7 +628,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
                             inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
-                                $ErrorActionPreference='Stop'; $verbosePreference='Continue'; $ProgressPreference = "SilentlyContinue"
+                                $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                                 $env:RUNNER_ALLOW_RUNASROOT=1
                                 cd "C:\r"
                                 ./config.cmd {inputArgs}

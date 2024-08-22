@@ -341,7 +341,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
-            vmCommunicator = "winssh";
+            vmCommunicator = "ssh";
         }
         else
         {
@@ -363,7 +363,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                                 _logger.LogDebug("{x}", stdOut.Text);
                                 break;
                             case StandardErrorCommandEvent stdErr:
-                                _logger.LogError("{x}", stdErr.Text);
+                                _logger.LogDebug("{x}", stdErr.Text);
                                 break;
                             case ExitedCommandEvent exited:
                                 var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
@@ -491,7 +491,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                     _logger.LogDebug("{x}", stdOut.Text);
                     break;
                 case StandardErrorCommandEvent stdErr:
-                    _logger.LogDebug("{x}", stdErr.Text);
+                    _logger.LogError("{x}", stdErr.Text);
                     break;
                 case ExitedCommandEvent exited:
                     var msg = $"vagrant destroy -f ended with return code {exited.ExitCode}";
@@ -510,7 +510,8 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task DeleteVMCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
     {
-        var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: cancellationToken);
+        var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(1));
+        var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
         var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
         string? vmId = null;
         foreach (var prop in getVmJson.RootElement.EnumerateArray())
@@ -523,8 +524,17 @@ public class VagrantService(ILogger<VagrantService> logger)
         }
         if (vmId != null)
         {
-            await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: cancellationToken);
-            await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: cancellationToken);
+            await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+            await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+            while (!ctxTimed.IsCancellationRequested)
+            {
+                var result = await Cli.BuildRun("powershell", ["Get-VM", "-Name", vmId], dir).ExecuteAsync(ctxTimed);
+                if (result.ExitCode != 0)
+                {
+                    break;
+                }
+                await Task.Delay(5000, ctxTimed);
+            }
         }
         (dir / ".vagrant").DeleteDirectory();
     }
