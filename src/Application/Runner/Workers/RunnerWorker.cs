@@ -46,6 +46,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly ConcurrentDictionary<string, RunnerInstance> executingReplicaMap = [];
 
     private const string RunnerIdentifier = "managed_runner";
+    private const string GithubRunnerVersion = "2.319.1";
+    private const string GithubRunnerLinuxSHA256 = "3f6efb7488a183e291fc2c62876e14c9ee732864173734facc85a1bfb1744464";
+    private const string GithubRunnerWindowsSHA256 = "1c78c51d20b817fb639e0b0ab564cf0469d083ad543ca3d0d7a2cdad5723f3a7";
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -580,9 +583,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         bootstrapInputScript = $$"""
                             mkdir "/r"
                             cd "/r"                
-                            RUNNER_VERSION=2.317.0
+                            RUNNER_VERSION={{GithubRunnerVersion}}
                             curl -fSL --output /tmp/actions-runner-linux-x64.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
-                            RUNNER_SHA256='9e883d210df8c6028aff475475a457d380353f9d01877d51cc01a17b2a91161d'
+                            RUNNER_SHA256='{{GithubRunnerLinuxSHA256}}'
                             echo "$RUNNER_SHA256 /tmp/actions-runner-linux-x64.tar.gz" | sha256sum -c -
                             tar -xzf /tmp/actions-runner-linux-x64.tar.gz -C /r
                             ./bin/installdependencies.sh
@@ -594,9 +597,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             $ErrorActionPreference='Stop'; $verbosePreference='Continue'; $ProgressPreference = "SilentlyContinue"
                             mkdir "C:\\r"
                             cd "C:\\r"
-                            $RUNNER_VERSION = "2.317.0"
+                            $RUNNER_VERSION = "{{GithubRunnerVersion}}"
                             Invoke-WebRequest "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-win-x64-${RUNNER_VERSION}.zip" -OutFile "${env:TEMP}\\actions-runner-win-x64.zip" -UseBasicParsing;
-                            $RUNNER_SHA256 = 'a74dcd1612476eaf4b11c15b3db5a43a4f459c1d3c1807f8148aeb9530d69826';
+                            $RUNNER_SHA256 = '{{GithubRunnerWindowsSHA256}}';
                             if ((Get-FileHash "${env:TEMP}\\actions-runner-win-x64.zip" -Algorithm sha256).Hash -ne $RUNNER_SHA256) {
                               Write-Host 'RUNNER_SHA256 CHECKSUM VERIFICATION FAILED!';
                               exit 1;
