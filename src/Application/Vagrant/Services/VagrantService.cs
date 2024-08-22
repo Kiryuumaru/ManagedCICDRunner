@@ -142,6 +142,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.network "public_network", bridge: "Default Switch"
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
+                    hv.differencing_disk = true
                   end
                   config.vm.provision "shell", inline: <<-SHELL
                     {inputScript}
@@ -325,6 +326,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.network "public_network", bridge: "Default Switch"
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
+                    hv.differencing_disk = true
                     hv.memory = "{1024 * memoryGB}"
                     hv.cpus = "{cpus}"
                   end
