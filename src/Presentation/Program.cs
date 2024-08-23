@@ -52,8 +52,12 @@ async Task installAsService()
     var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
     var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
-    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
-    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
+    try
+    {
+        await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
+        await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
+    }
+    catch { }
     await Cli.RunOnce($"{winswExecPath} install {serviceConfig}", stoppingToken: cts.Token);
     await Cli.RunOnce($"{winswExecPath} start {serviceConfig}", stoppingToken: cts.Token);
 }
@@ -65,7 +69,11 @@ async Task uninstallAsService()
     var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
     var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
 
-    await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
+    try
+    {
+        await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
+    }
+    catch { }
     await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
 }
 
