@@ -17,6 +17,8 @@ public class RunnerAddDto
 
     public required int Replicas { get; init; }
 
+    public required int MaxReplicas { get; init; }
+
     public required int Cpus { get; init; }
 
     public required int MemoryGB { get; init; }

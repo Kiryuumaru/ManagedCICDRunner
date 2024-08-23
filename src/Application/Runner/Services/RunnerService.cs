@@ -117,6 +117,13 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             return result;
         }
 
+        if (runnerAddDto.Replicas > runnerAddDto.MaxReplicas)
+        {
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("RUNNER_REPLICA_INVALID", "Runner replicas is greater than maxReplicas");
+            return result;
+        }
+
         var runnerTokenStore = _runnerTokenStoreService.GetStore();
 
         if (!result.Success(await runnerTokenStore.Get<RunnerTokenEntity>(runnerAddDto.TokenId.ToLowerInvariant(), cancellationToken: cancellationToken), out RunnerTokenEntity? runnerToken))
@@ -142,6 +149,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Vagrantfile = runnerAddDto.Vagrantfile,
             RunnerOS = runnerAddDto.RunnerOS,
             Replicas = runnerAddDto.Replicas,
+            MaxReplicas = runnerAddDto.MaxReplicas,
             Cpus = runnerAddDto.Cpus,
             MemoryGB = runnerAddDto.MemoryGB,
             Group = runnerAddDto.Group,
@@ -201,11 +209,26 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Vagrantfile = !string.IsNullOrEmpty(runnerEditDto.NewVagrantfile) ? runnerEditDto.NewVagrantfile : runner.Vagrantfile,
             RunnerOS = runnerEditDto.NewRunnerOS ?? runner.RunnerOS,
             Replicas = runnerEditDto.NewReplicas ?? runner.Replicas,
+            MaxReplicas = runnerEditDto.NewMaxReplicas ?? runner.MaxReplicas,
             Group = !string.IsNullOrEmpty(runnerEditDto.NewGroup) ? runnerEditDto.NewGroup : runner.Group,
             Labels = runnerEditDto.NewLabels ?? runner.Labels,
             Cpus = runnerEditDto.NewCpus ?? runner.Cpus,
             MemoryGB = runnerEditDto.NewMemoryGB ?? runner.MemoryGB
         };
+
+        if (newRunner.Labels.Length == 0 && newRunner.Labels.Any(i => i.Contains(' ')))
+        {
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("RUNNER_LABELS_INVALID", "Runner labels is invalid");
+            return result;
+        }
+
+        if (newRunner.Replicas > newRunner.MaxReplicas)
+        {
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("RUNNER_REPLICA_INVALID", "Runner replicas is greater than maxReplicas");
+            return result;
+        }
 
         if (!result.Success(await store.Set(id.ToLowerInvariant(), newRunner, cancellationToken: cancellationToken)))
         {
@@ -262,6 +285,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
                 Vagrantfile = runner.Vagrantfile,
                 RunnerOS = runner.RunnerOS,
                 Replicas = runner.Replicas,
+                MaxReplicas = runner.MaxReplicas,
                 Group = runner.Group,
                 Labels = runner.Labels,
                 Cpus = runner.Cpus,

@@ -457,14 +457,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         List<Task> deleteAllExcessTasks = [];
         foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
-            int numExcess = runnerRuntime.Runners.Count - runnerRuntime.RunnerEntity.Replicas;
+            int numExcess = runnerRuntime.Runners.Count - runnerRuntime.RunnerEntity.MaxReplicas;
             if (numExcess > 0)
             {
                 List<RunnerInstance> runnerInstancesToRemove = [];
-                while (numExcess >= runnerInstancesToRemove.Count)
+                for (int i = 0; i < numExcess; i++)
                 {
-                    var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready && !runnerInstancesToRemove.Contains(i)) ??
-                        runnerRuntime.Runners.Values.FirstOrDefault(i => !runnerInstancesToRemove.Contains(i));
+                    var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready && !runnerInstancesToRemove.Contains(i));
                     if (runner == null)
                     {
                         break;
@@ -544,12 +543,13 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            if (runnerRuntime.RunnerEntity.Replicas > runnerRuntime.Runners.Count)
+            int numUpscale = runnerRuntime.RunnerEntity.Replicas - runnerRuntime.Runners.Where(i => i.Value.Status != RunnerStatus.Busy).Count();
+            if (numUpscale > 0)
             {
                 var runners = runnerRuntime.Runners.ToArray();
                 var rev = $"{runnerRuntime.TokenRev}-{runnerRuntime.RunnerRev}";
 
-                for (int i = 0; i < (runnerRuntime.RunnerEntity.Replicas - runners.Length); i++)
+                for (int i = 0; i < numUpscale; i++)
                 {
                     string id = $"{RunnerIdentifier}-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
                     string replicaId = $"{id}-{runnerRuntime.RunnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";

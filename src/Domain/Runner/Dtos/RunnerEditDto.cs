@@ -15,6 +15,8 @@ public class RunnerEditDto
 
     public int? NewReplicas { get; init; }
 
+    public int? NewMaxReplicas { get; init; }
+
     public int? NewCpus { get; init; }
 
     public int? NewMemoryGB { get; init; }
