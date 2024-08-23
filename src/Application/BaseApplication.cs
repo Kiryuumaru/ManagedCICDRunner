@@ -1,8 +1,8 @@
 ﻿using Application.Common;
-using Application.Docker.Services;
 using Application.LocalStore.Services;
 using Application.Runner.Services;
 using Application.Runner.Workers;
+using Application.Vagrant.Services;
 using ApplicationBuilderHelpers;
 using Domain.Runner.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +18,7 @@ public class BaseApplication : ApplicationDependency
         services.AddTransient<LocalStoreService>();
         services.AddSingleton<LocalStoreConcurrencyService>();
 
-        services.AddScoped<DockerService>();
+        services.AddSingleton<VagrantService>();
 
         services.AddScoped<RunnerService>();
         services.AddScoped<RunnerTokenService>();

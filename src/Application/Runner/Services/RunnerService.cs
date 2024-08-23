@@ -103,7 +103,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             return result;
         }
 
-        if (string.IsNullOrEmpty(runnerAddDto.Image))
+        if (string.IsNullOrEmpty(runnerAddDto.Vagrantfile))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
             result.WithError("RUNNER_IMAGE_INVALID", "Runner image is invalid");
@@ -139,9 +139,9 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Id = StringHelpers.Random(6, false).ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
-            Image = runnerAddDto.Image,
+            Vagrantfile = runnerAddDto.Vagrantfile,
             RunnerOS = runnerAddDto.RunnerOS,
-            Count = runnerAddDto.Count,
+            Replicas = runnerAddDto.Replicas,
             Cpus = runnerAddDto.Cpus,
             MemoryGB = runnerAddDto.MemoryGB,
             Group = runnerAddDto.Group,
@@ -198,9 +198,9 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Id = runner.Id.ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
-            Image = !string.IsNullOrEmpty(runnerEditDto.NewImage) ? runnerEditDto.NewImage : runner.Image,
+            Vagrantfile = !string.IsNullOrEmpty(runnerEditDto.NewVagrantfile) ? runnerEditDto.NewVagrantfile : runner.Vagrantfile,
             RunnerOS = runnerEditDto.NewRunnerOS ?? runner.RunnerOS,
-            Count = runnerEditDto.NewCount ?? runner.Count,
+            Replicas = runnerEditDto.NewReplicas ?? runner.Replicas,
             Group = !string.IsNullOrEmpty(runnerEditDto.NewGroup) ? runnerEditDto.NewGroup : runner.Group,
             Labels = runnerEditDto.NewLabels ?? runner.Labels,
             Cpus = runnerEditDto.NewCpus ?? runner.Cpus,
@@ -259,9 +259,9 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
                 Id = runner.Id,
                 Rev = runner.Rev,
                 Deleted = true,
-                Image = runner.Image,
+                Vagrantfile = runner.Vagrantfile,
                 RunnerOS = runner.RunnerOS,
-                Count = runner.Count,
+                Replicas = runner.Replicas,
                 Group = runner.Group,
                 Labels = runner.Labels,
                 Cpus = runner.Cpus,

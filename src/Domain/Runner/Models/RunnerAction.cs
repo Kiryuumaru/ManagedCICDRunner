@@ -1,5 +1,5 @@
-﻿using Domain.Docker.Models;
-using Domain.Runner.Entities;
+﻿using Domain.Runner.Entities;
+using Domain.Runner.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -16,5 +16,5 @@ public class RunnerAction
 
     public required string Id { get; init; }
 
-    public required bool Busy { get; init; }
+    public required RunnerActionStatus Status { get; init; }
 }

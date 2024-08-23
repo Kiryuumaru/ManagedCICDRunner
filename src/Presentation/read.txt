@@ -1,5 +1,22 @@
 
 
+
+
+vagrant destroy -f
+vagrant up --provider hyperv
+vagrant reload
+
+
+
+vagrant ssh
+
+
+
+docker run hello-world:nanoserver-ltsc2022
+
+
+
+
 docker -H "npipe:////./pipe/docker_engine_linux" build -t "trylinux:test" -f "./Dockerfiles/LinuxDockerfile" .
 docker -H "npipe:////./pipe/docker_engine_linux" run --name "trylinux" --cpus="4" --memory="8g" -it --rm "trylinux:test" /bin/bash
 
@@ -18,6 +35,65 @@ vagrant plugin install vagrant-scp
 
 
 
-vagrant 
 
-mkdir Ubuntu2204Vagrantfile
+mkdir .Ubuntu2204Vagrantfile
+copy /b /v /y "Ubuntu2204Vagrantfile" ".Ubuntu2204Vagrantfile\Vagrantfile"
+cd .Ubuntu2204Vagrantfile
+vagrant up
+
+vagrant scp "C:\Users\Administrator\source\repos\Kiryuumaru\ManagedCICDRunner\src\Presentation\HostAssets\linux":"/runner"
+
+
+vagrant package --output "vag.box"
+
+vagrant box add --name vag "vag.box"
+vagrant destroy -f
+
+
+
+{
+  "githubToken": "github_pat_svsvsvV",
+  "githubRepo": "vianactl",
+  "githubOrg": "skunkworks-ai"
+}
+
+
+{
+  "tokenId": "fqrfxg",
+  "vagrantfile": "Vagrantfiles/Ubuntu2204Vagrantfile",
+  "runnerOS": "Linux",
+  "replicas": 1,
+  "cpus": 4,
+  "memoryGB": 8,
+  "group": "default",
+  "labels": [
+    "self-hosted",
+    "ubuntu-22.04",
+    "x64"
+  ]
+}
+
+
+
+{
+  "tokenId": "fqrfxg",
+  "vagrantfile": "Vagrantfiles/Windows11Vagrantfile",
+  "runnerOS": "Windows",
+  "replicas": 1,
+  "cpus": 4,
+  "memoryGB": 8,
+  "group": "default",
+  "labels": [
+    "self-hosted",
+    "windows-11",
+    "x64"
+  ]
+}
+
+
+
+
+
+
+
+

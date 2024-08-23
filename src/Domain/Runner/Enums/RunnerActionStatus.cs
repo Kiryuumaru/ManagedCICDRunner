@@ -4,9 +4,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Domain.Docker.Enums;
+namespace Domain.Runner.Enums;
 
-public enum ContainerState
+public enum RunnerActionStatus
 {
-    Created, Running, Restarting, Exited, Paused, Dead, Removing
+    Offline,
+    Ready,
+    Busy
 }

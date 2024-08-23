@@ -1,14 +1,14 @@
 ﻿using Application.Common;
-using Application.Docker.Services;
 using Application.LocalStore.Services;
 using Application.Runner.Services;
+using Application.Vagrant.Services;
 using CliWrap.EventStream;
-using Domain.Docker.Enums;
-using Domain.Docker.Models;
 using Domain.Runner.Dtos;
 using Domain.Runner.Entities;
 using Domain.Runner.Enums;
 using Domain.Runner.Models;
+using Domain.Vagrant.Enums;
+using Domain.Vagrant.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -27,6 +27,7 @@ using System.Reflection.Emit;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
@@ -37,67 +38,35 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly ILogger<RunnerWorker> _logger = logger;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-    private readonly static AbsolutePath HostAssetsDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "HostAssets";
-    private readonly static AbsolutePath LinuxHostAssetsDir = HostAssetsDir / "linux";
-    private readonly static AbsolutePath WindowsHostAssetsDir = HostAssetsDir / "windows";
-    private readonly static AbsolutePath LinuxActionsRunner = LinuxHostAssetsDir / "actions-runner-linux-x64.tar.gz";
-    private readonly static AbsolutePath WindowsActionsRunner = WindowsHostAssetsDir / "actions-runner-win-x64.zip";
-    private readonly static AbsolutePath ActionsRunnerDockerfilesDir = AbsolutePath.Parse(Environment.CurrentDirectory) / "Dockerfiles" / ".ActionsRunner";
-
-    private readonly static (string OS, string Url, string Hash, AbsolutePath Path)[] HostAssetMatrix =
-    [
-        (
-            "linux",
-            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz",
-            "9e883d210df8c6028aff475475a457d380353f9d01877d51cc01a17b2a91161d",
-            LinuxActionsRunner
-        ), (
-            "windows",
-            "https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-win-x64-2.317.0.zip",
-            "a74dcd1612476eaf4b11c15b3db5a43a4f459c1d3c1807f8148aeb9530d69826",
-            WindowsActionsRunner
-        )
-    ];
-
     private readonly ExecutorLocker executorLocker = new();
 
     private readonly Dictionary<string, RunnerRuntime> runnerRuntimeMap = [];
 
-    private readonly ConcurrentDictionary<string, RunnerInstance> building = [];
+    private readonly ConcurrentDictionary<string, RunnerInstance> buildingReplicaMap = [];
+    private readonly ConcurrentDictionary<string, RunnerInstance> executingReplicaMap = [];
 
-    private bool wslAlive = false;
-    private bool lastWslAlive = false;
-    private bool lastDockerAlive = false;
+    private const string RunnerIdentifier = "managed_runner";
+    private const string GithubRunnerVersion = "2.319.1";
+    private const string GithubRunnerLinuxSHA256 = "3f6efb7488a183e291fc2c62876e14c9ee732864173734facc85a1bfb1744464";
+    private const string GithubRunnerWindowsSHA256 = "1c78c51d20b817fb639e0b0ab564cf0469d083ad543ca3d0d7a2cdad5723f3a7";
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), true, stoppingToken, WslKeepAlive, ex => _logger.LogError("WSL keep-alive error: {msg}", ex.Message));
         RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine1, ex => _logger.LogError("Runner error: {msg}", ex.Message));
         return Task.CompletedTask;
     }
 
-    private async Task WslKeepAlive(CancellationToken stoppingToken)
+    private async Task Routine1(CancellationToken stoppingToken)
     {
-        await foreach (var commandEvent in Cli.RunListen("C:\\Windows\\System32\\wsl.exe", ["while true; do sleep 2; done"], stoppingToken: stoppingToken))
-        {
-            switch (commandEvent)
-            {
-                case StartedCommandEvent:
-                    wslAlive = true;
-                    break;
-                case StandardOutputCommandEvent outEvent:
-                    _logger.LogError("{out}", outEvent.Text);
-                    break;
-                case ExitedCommandEvent:
-                    wslAlive = false;
-                    _logger.LogError("WSL keep-alive error: WSL exited.");
-                    break;
-                case StandardErrorCommandEvent errEvent:
-                    wslAlive = false;
-                    _logger.LogError("WSL keep-alive error: {err}", errEvent.Text);
-                    break;
-            }
-        }
+        using var scope = _serviceProvider.CreateScope();
+        var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
+        var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
+        var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
+        var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
+        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
+
+        await Task.Delay(1000, stoppingToken);
     }
 
     private async Task Routine(CancellationToken stoppingToken)
@@ -105,33 +74,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         using var scope = _serviceProvider.CreateScope();
         var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
         var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
-        var dockerService = scope.ServiceProvider.GetRequiredService<DockerService>();
+        var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
         var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
-
-        if (!wslAlive)
-        {
-            lastWslAlive = false;
-            _logger.LogError("WSL is not alive");
-            return;
-        }
-        else if (!lastWslAlive)
-        {
-            _logger.LogInformation("WSL is alive");
-            lastWslAlive = true;
-        }
-
-        if (!await dockerService.IsDaemonAlive())
-        {
-            lastDockerAlive = false;
-            _logger.LogError("Docker daemon is not alive");
-            return;
-        }
-        else if (!lastDockerAlive)
-        {
-            _logger.LogInformation("Docker is alive");
-            lastDockerAlive = true;
-        }
 
         _logger.LogDebug("Runner routine start...");
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
@@ -146,45 +91,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
 
-        _logger.LogDebug("Fetching common assets...");
-        List<Task> commonAssetsTasks = [];
-        foreach (var (os, url, hash, actionRunnersPath) in HostAssetMatrix)
-        {
-            commonAssetsTasks.Add(Task.Run(async () =>
-            {
-                while (!actionRunnersPath.FileExists() || !FileHasher.GetFileHash(actionRunnersPath).Equals(hash, StringComparison.InvariantCultureIgnoreCase))
-                {
-                    _logger.LogInformation("Downloading common asset {}...", url);
-                    try
-                    {
-                        actionRunnersPath.Parent.CreateDirectory();
-                        if (actionRunnersPath.FileExists())
-                        {
-                            actionRunnersPath.DeleteFile();
-                        }
-                        using var s = await httpClient.GetStreamAsync(url, stoppingToken);
-                        using var fs = new FileStream(actionRunnersPath, FileMode.OpenOrCreate);
-                        await s.CopyToAsync(fs, stoppingToken);
-                        _logger.LogInformation("Downloading common asset {} done", url);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError("Downloading common asset {} error: {}", url, ex);
-                        await Task.Delay(2000, stoppingToken);
-                    }
-                }
-            }, stoppingToken));
-        }
-        await Task.WhenAll(commonAssetsTasks);
-
         _logger.LogDebug("Fetching runner token entities from service...");
         var runnerTokenEntityMap = (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow();
 
         _logger.LogDebug("Fetching runner entities from service...");
         var runnerEntityMap = (await runnerService.GetAll(stoppingToken)).GetValueOrThrow();
 
-        _logger.LogDebug("Fetching docker containers from service...");
-        var dockerContainers = await dockerService.GetContainers();
+        _logger.LogDebug("Fetching vagrant instances from service...");
+        var vagrantReplicas = await vagrantService.GetReplicas(stoppingToken);
 
         _logger.LogDebug("Fetching runner token actions from API...");
         Dictionary<string, (RunnerTokenEntity RunnerTokenEntity, List<RunnerAction> RunnerActions)> runnerTokenMap = [];
@@ -197,7 +111,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 string name = string.IsNullOrEmpty(runnerToken.GithubOrg) ? "" : $"{runnerToken.GithubOrg}/";
                 name += string.IsNullOrEmpty(runnerToken.GithubRepo) ? "" : $"{runnerToken.GithubRepo}";
                 name = name.Trim('/');
-                _logger.LogError("Error fetching runners for runner token {}: {}", name, runnerListResult.Error!.Message);
+                throw new Exception($"Error fetching runners for runner token {name}: {runnerListResult.Error!.Message}");
             }
             List<RunnerAction> runnerActions = [];
             if (runnerListResult.HasValue)
@@ -209,14 +123,24 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     if (nameSplit.Length == 5 && nameSplit[0] == "managed_runner" && nameSplit[1] == runnerControllerId)
                     {
                         string id = runnerJson.GetProperty("id").GetInt32().ToString();
+                        string statusStr = runnerJson.GetProperty("status").GetString()!;
                         bool busy = runnerJson.GetProperty("busy").GetBoolean();
+                        RunnerActionStatus status;
+                        if (statusStr.Equals("online"))
+                        {
+                            status = busy ? RunnerActionStatus.Busy : RunnerActionStatus.Ready;
+                        }
+                        else
+                        {
+                            status = RunnerActionStatus.Offline;
+                        }
                         var runnerId = nameSplit[2];
                         var runnerAction = new RunnerAction()
                         {
                             Id = id,
                             RunnerId = runnerId,
                             Name = name,
-                            Busy = busy
+                            Status = status
                         };
                         runnerActions.Add(runnerAction);
                         runnerActionMap[name] = (runnerAction, runnerToken);
@@ -226,107 +150,36 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             runnerTokenMap[runnerToken.Id] = (runnerToken, runnerActions);
         }
 
-        _logger.LogDebug("Checking cache server...");
-        if (!dockerContainers.Any(i => i.Labels.TryGetValue("cicd.self_runner_cache_for", out _)))
-        {
-            try
-            {
-                IPAddress hostAddress = Dns.GetHostAddresses("host.docker.internal")[0];
-                _logger.LogInformation("Cache server not found. Adding cache server...");
-                RunnerOSType runnerOS = RunnerOSType.Linux;
-                string name = $"managed_runner-{runnerControllerId}-cache_container-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                string image = "ghcr.io/falcondev-oss/github-actions-cache-server:latest";
-                string runnerId = $"managed_runner-{runnerControllerId}";
-                string dockerArgs = "";
-                dockerArgs += $" -l \"cicd.self_runner_cache_for={runnerControllerId}\"";
-                dockerArgs += $" -e \"URL_ACCESS_TOKEN={runnerControllerId}\"";
-                dockerArgs += $" -e \"API_BASE_URL=http://{hostAddress}:3000\"";
-                dockerArgs += $" -v \"cache-server-data:/app/.data\"";
-                dockerArgs += $" -p \"3000:3000\"";
-                dockerArgs += " --add-host host.docker.internal=host-gateway";
-                await dockerService.Build(runnerOS, image, runnerId);
-                await dockerService.Run(runnerOS, name, image, runnerId, 2, 4, null, dockerArgs);
-                _logger.LogInformation("Cache server created: {id}", name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogInformation("Runner cache container init error: {ex}", ex.Message);
-            }
-        }
-
-        _logger.LogDebug("Updating runner entities to runtime runners...");
+        _logger.LogDebug("Updating entities to runtime runners map...");
         foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
-            if (runnerEntityMap.TryGetValue(runnerRuntime.RunnerId, out var runnerEntity))
+            var runnerEntity = runnerEntityMap.GetValueOrDefault(runnerRuntime.RunnerId);
+            var runnerTokenEntity = runnerTokenEntityMap.GetValueOrDefault(runnerRuntime.TokenId);
+            runnerRuntimeMap[runnerRuntime.RunnerId] = new()
             {
-                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
-                {
-                    TokenId = runnerRuntime.TokenId,
-                    TokenRev = runnerRuntime.TokenRev,
-                    RunnerId = runnerEntity.Id,
-                    RunnerRev = runnerRuntime.RunnerRev,
-                    RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
-                    RunnerEntity = runnerEntity,
-                    Runners = runnerRuntime.Runners,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating runner token entities to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
-        {
-            if (runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
-            {
-                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
-                {
-                    TokenId = runnerTokenEntity.Id,
-                    TokenRev = runnerRuntime.TokenRev,
-                    RunnerId = runnerRuntime.RunnerId,
-                    RunnerRev = runnerRuntime.RunnerRev,
-                    RunnerTokenEntity = runnerTokenEntity,
-                    RunnerEntity = runnerRuntime.RunnerEntity,
-                    Runners = runnerRuntime.Runners,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating docker containers to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
+                TokenId = runnerRuntime.TokenId,
+                TokenRev = runnerRuntime.TokenRev,
+                RunnerId = runnerRuntime.RunnerId,
+                RunnerRev = runnerRuntime.RunnerRev,
+                RunnerTokenEntity = runnerTokenEntity ?? runnerRuntime.RunnerTokenEntity,
+                RunnerEntity = runnerEntity ?? runnerRuntime.RunnerEntity,
+                Runners = runnerRuntime.Runners,
+            };
             foreach (var runner in runnerRuntime.Runners.Values)
             {
-                var dockerContainer = dockerContainers.FirstOrDefault(i =>
-                    i.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
-                    i.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName) &&
-                    containerRunnerId == runnerRuntime.RunnerId &&
-                    containerRunnerName == runner.Name);
-                runnerRuntime.Runners[runner.Name] = new()
-                {
-                    Name = runner.Name,
-                    DockerContainer = dockerContainer,
-                    RunnerAction = runner.RunnerAction,
-                    Status = runner.Status,
-                };
-            }
-        }
-
-        _logger.LogDebug("Updating action runners to runtime runners...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
-            foreach (var runner in runnerRuntime.Runners.Values)
-            {
+                var vagrantReplica = vagrantReplicas.GetValueOrDefault(runner.Name);
                 var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(runner.Name);
                 runnerRuntime.Runners[runner.Name] = new()
                 {
                     Name = runner.Name,
-                    DockerContainer = runner.DockerContainer,
+                    VagrantReplica = vagrantReplica,
                     RunnerAction = RunnerAction,
                     Status = runner.Status,
                 };
             }
         }
 
-        _logger.LogDebug("Adding runner entities and runner token entities to runtime runners...");
+        _logger.LogDebug("Adding entities to runtime runners map...");
         foreach (var runnerEntity in runnerEntityMap.Values)
         {
             if (runnerRuntimeMap.ContainsKey(runnerEntity.Id))
@@ -349,29 +202,26 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             };
         }
 
-        _logger.LogDebug("Adding docker containers to runtime runners...");
-        foreach (var dockerContainer in dockerContainers)
+        _logger.LogDebug("Adding vagrant replicas to runtime runners...");
+        foreach (var vagrantReplica in vagrantReplicas.Values)
         {
-            if (dockerContainer.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
-                dockerContainer.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName))
+            if (vagrantReplica == null)
             {
-                if (!runnerRuntimeMap.TryGetValue(containerRunnerId, out var runnerRuntime))
-                {
-                    continue;
-                }
-                if (runnerRuntime.Runners.ContainsKey(containerRunnerName))
-                {
-                    continue;
-                }
-                var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(containerRunnerName);
-                runnerRuntime.Runners[containerRunnerName] = new()
-                {
-                    Name = containerRunnerName,
-                    DockerContainer = dockerContainer,
-                    RunnerAction = RunnerAction,
-                    Status = RunnerStatus.Building,
-                };
+                continue;
             }
+            var runnerId = vagrantReplica.Labels["runnerId"];
+            if (!runnerRuntimeMap.TryGetValue(runnerId, out var runnerRuntime))
+            {
+                continue;
+            }
+            var (RunnerAction, _) = runnerActionMap.GetValueOrDefault(vagrantReplica.Id);
+            runnerRuntime.Runners[vagrantReplica.Id] = new()
+            {
+                Name = vagrantReplica.Id,
+                VagrantReplica = vagrantReplica,
+                RunnerAction = RunnerAction,
+                Status = RunnerStatus.Building,
+            };
         }
 
         _logger.LogDebug("Adding action runners to runtime runners...");
@@ -385,211 +235,190 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            var dockerContainer = dockerContainers.FirstOrDefault(i =>
-                i.Labels.TryGetValue("cicd.self_runner_id", out var containerRunnerId) &&
-                i.Labels.TryGetValue("cicd.self_runner_name", out var containerRunnerName) &&
-                containerRunnerId == runnerRuntime.RunnerId &&
-                containerRunnerName == RunnerAction.Name);
+            var vagrantReplica = vagrantReplicas.GetValueOrDefault(RunnerAction.Name);
             runnerRuntime.Runners[RunnerAction.Name] = new()
             {
                 Name = RunnerAction.Name,
-                DockerContainer = dockerContainer,
+                VagrantReplica = vagrantReplica,
                 RunnerAction = RunnerAction,
                 Status = RunnerStatus.Building,
             };
         }
 
-        _logger.LogDebug("Updating runtime runner instance status...");
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
-            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
-            {
-                RunnerStatus runnerStatus = RunnerStatus.Building;
-                if (runner.DockerContainer != null && runner.RunnerAction != null)
-                {
-                    runnerStatus = runner.RunnerAction.Busy ? RunnerStatus.Busy : RunnerStatus.Ready;
-                }
-                else if (runner.DockerContainer != null && runner.RunnerAction == null)
-                {
-                    runnerStatus = RunnerStatus.Starting;
-                }
-                runnerRuntime.Runners[runner.Name] = new()
-                {
-                    Name = runner.Name,
-                    DockerContainer = runner.DockerContainer,
-                    RunnerAction = runner.RunnerAction,
-                    Status = runnerStatus
-                };
-            }
-        }
-
-        _logger.LogDebug("Removing deleted runner tokens...");
+        _logger.LogDebug("Removing deleted runners...");
+        List<Task> runnersTokensDeleteTasks = [];
         foreach (var runnerTokenEntity in runnerTokenEntityMap.Values)
         {
             if (!runnerTokenEntity.Deleted)
             {
                 continue;
             }
-            foreach (var runnerRuntime in runnerRuntimeMap.Values.Where(i => i.TokenId == runnerTokenEntity.Id))
+            runnersTokensDeleteTasks.Add(Task.Run(async () =>
             {
-                (await runnerService.Delete(runnerRuntime.RunnerEntity.Id, false, stoppingToken)).ThrowIfError();
-                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+                List<Task> runnersTokenDeleteTasks = [];
+                foreach (var runnerRuntime in runnerRuntimeMap.Values.Where(i => i.TokenId == runnerTokenEntity.Id))
                 {
-                    if (runner.RunnerAction != null)
+                    runnersTokenDeleteTasks.Add(Task.Run(async () =>
                     {
-                        try
+                        (await runnerService.Delete(runnerRuntime.RunnerEntity.Id, false, stoppingToken)).ThrowIfError();
+                        List<Task> runnersDeleteTasks = [];
+                        foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                         {
-                            (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                            runnersDeleteTasks.Add(Task.Run(async () =>
+                            {
+                                await DeleteRunner(runner, runnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                                runnerRuntime.Runners.Remove(runner.Name);
+                                _logger.LogInformation("Runner purged (token deleted): {name}", runner.Name);
+                            }, stoppingToken));
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                        }
-                    }
-                    if (runner.DockerContainer != null)
-                    {
-                        await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
-                    }
-                    runnerRuntime.Runners.Remove(runner.Name);
-                    _logger.LogInformation("Runner purged (token deleted): {name}", runner.Name);
+                        await Task.WhenAll(runnersDeleteTasks);
+                        (await runnerService.Delete(runnerRuntime.RunnerId, true, stoppingToken)).ThrowIfError();
+                        runnerRuntimeMap.Remove(runnerRuntime.RunnerId);
+                        _logger.LogInformation("Runner instance purged (token deleted): {name}", runnerRuntime.RunnerId);
+                    }, stoppingToken));
                 }
-                (await runnerService.Delete(runnerRuntime.RunnerId, true, stoppingToken)).ThrowIfError();
-                runnerRuntimeMap.Remove(runnerRuntime.RunnerId);
-                _logger.LogInformation("Runner instance purged (token deleted): {name}", runnerRuntime.RunnerId);
-            }
-            (await runnerTokenService.Delete(runnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
-            _logger.LogInformation("Runner token purged (token deleted): {name}", runnerTokenEntity.Id);
+                await Task.WhenAll(runnersTokenDeleteTasks);
+                (await runnerTokenService.Delete(runnerTokenEntity.Id, true, stoppingToken)).ThrowIfError();
+                _logger.LogInformation("Runner token purged (token deleted): {name}", runnerTokenEntity.Id);
+            }, stoppingToken));
         }
-
-        _logger.LogDebug("Removing deleted runners...");
+        await Task.WhenAll(runnersTokensDeleteTasks);
+        List<Task> runnersEntitiesDeleteTasks = [];
         foreach (var runnerEntity in runnerEntityMap.Values)
         {
             if (!runnerEntity.Deleted)
             {
                 continue;
             }
-            if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
+            runnersEntitiesDeleteTasks.Add(Task.Run(async () =>
             {
-                continue;
-            }
-            if (!runnerRuntimeMap.TryGetValue(runnerEntity.Id, out var runnerRuntime))
-            {
-                continue;
-            }
-            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
-            {
-                if (runner.DockerContainer != null)
+                if (!runnerTokenEntityMap.TryGetValue(runnerEntity.TokenId, out var runnerTokenEntity))
                 {
-                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
+                    return;
                 }
-                if (runner.RunnerAction != null)
+                if (!runnerRuntimeMap.TryGetValue(runnerEntity.Id, out var runnerRuntime))
                 {
-                    try
-                    {
-                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                    }
+                    return;
                 }
-                runnerRuntime.Runners.Remove(runner.Name);
-                _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
-            }
-            (await runnerService.Delete(runnerEntity.Id, true, stoppingToken)).ThrowIfError();
-            runnerRuntimeMap.Remove(runnerEntity.Id);
-            _logger.LogInformation("Runner instance purged (runner deleted): {name}", runnerEntity.Id);
-        }
-
-        _logger.LogDebug("Removing dangling runner actions...");
-        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
-        {
-            bool delete = false;
-            foreach (var runnerRuntime in runnerRuntimeMap.Values)
-            {
+                List<Task> runnersEntityDeleteTasks = [];
                 foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
-                    if (runner.Name == RunnerAction.Name && runner.DockerContainer == null)
+                    runnersEntityDeleteTasks.Add(Task.Run(async () =>
                     {
+                        await DeleteRunner(runner, runnerTokenEntity, vagrantService, httpClient, stoppingToken);
                         runnerRuntime.Runners.Remove(runner.Name);
-                        delete = true;
-                        break;
-                    }
+                        _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
+                    }, stoppingToken));
                 }
-                if (delete)
-                {
-                    break;
-                }
-            }
-            if (delete)
-            {
-                try
-                {
-                    (await Execute(httpClient, HttpMethod.Delete, RunnerTokenEntity, $"actions/runners/{RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("Action runner not deleted ({name}): {err}", RunnerAction.Name, ex.Message);
-                }
-                _logger.LogInformation("Runner action purged (dangling action): {name}", RunnerAction.Name);
-            }
+                await Task.WhenAll(runnersEntityDeleteTasks);
+                (await runnerService.Delete(runnerEntity.Id, true, stoppingToken)).ThrowIfError();
+                runnerRuntimeMap.Remove(runnerEntity.Id);
+                _logger.LogInformation("Runner instance purged (runner deleted): {name}", runnerEntity.Id);
+            }, stoppingToken));
         }
-        foreach (var runnerRuntime in runnerRuntimeMap.Values)
-        {
-            foreach (var runner in runnerRuntime.Runners.Values)
-            {
-                if (runner.DockerContainer == null && runner.RunnerAction != null)
-                {
-                    if (!runnerTokenEntityMap.TryGetValue(runnerRuntime.TokenId, out var runnerTokenEntity))
-                    {
-                        continue;
-                    }
-                    try
-                    {
-                        (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                    }
-                    _logger.LogInformation("Runner action purged (dangling action): {name}", runner.RunnerAction.Name);
-                }
-            }
-        }
+        await Task.WhenAll(runnersEntitiesDeleteTasks);
 
-        _logger.LogDebug("Removing dangling images...");
-        List<(DockerImage DockerImage, RunnerOSType RunnerOS)> allDockerImages = [];
-        allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Linux)).Select(i => (i, RunnerOSType.Linux)));
-        allDockerImages.AddRange((await dockerService.GetImages(RunnerOSType.Windows)).Select(i => (i, RunnerOSType.Windows)));
-        foreach (var (image, runnerOS) in allDockerImages)
+        _logger.LogDebug("Removing dangling runner actions...");
+        Dictionary<string, VagrantReplica?> vagrantReplicaToRemove = [];
+        Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionsToRemove = [];
+        foreach (var vagrantReplicaPair in vagrantReplicas)
         {
-            string[] repoSplit = image.Repository.Split('-');
-            if (repoSplit.Length >= 3 && repoSplit[0] == "managed_runner" && repoSplit[1] == runnerControllerId)
+            if (vagrantReplicaPair.Value == null)
             {
-                string containerRunnerId = repoSplit[2];
-                string tag = image.Tag;
-                if (!runnerRuntimeMap.TryGetValue(containerRunnerId, out var runnerRuntime))
+                vagrantReplicaToRemove[vagrantReplicaPair.Key] = null;
+            }
+            else
+            {
+                var (RunnerAction, RunnerTokenEntity) = runnerActionMap.GetValueOrDefault(vagrantReplicaPair.Value.Id);
+                if (!buildingReplicaMap.ContainsKey(vagrantReplicaPair.Value.Id) &&
+                    !executingReplicaMap.ContainsKey(vagrantReplicaPair.Value.Id) &&
+                    (
+                        vagrantReplicaPair.Value.State == VagrantReplicaState.Off ||
+                        vagrantReplicaPair.Value.State == VagrantReplicaState.NotCreated ||
+                        RunnerAction == null ||
+                        RunnerAction.Status == RunnerActionStatus.Offline
+                    ))
                 {
-                    var imageToDelete = $"{image.Repository}:{tag}";
-                    await dockerService.DeleteImages(runnerOS, imageToDelete);
-                    _logger.LogInformation("Runner image purged (outdated): {name}", imageToDelete);
+                    vagrantReplicaToRemove[vagrantReplicaPair.Value.Id] = vagrantReplicaPair.Value;
+                    if (RunnerAction != null)
+                    {
+                        runnerActionsToRemove[RunnerAction.Name] = (RunnerAction, RunnerTokenEntity);
+                    }
                 }
             }
         }
-
-        _logger.LogDebug("Removing dangling runners...");
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionMap.Values)
+        {
+            var vagrantReplica = vagrantReplicas.GetValueOrDefault(RunnerAction.Name);
+            if (!buildingReplicaMap.ContainsKey(RunnerAction.Name) &&
+                !executingReplicaMap.ContainsKey(RunnerAction.Name) &&
+                (
+                    RunnerAction.Status == RunnerActionStatus.Offline ||
+                    vagrantReplica == null ||
+                    vagrantReplica.State == VagrantReplicaState.Off ||
+                    vagrantReplica.State == VagrantReplicaState.NotCreated)
+                )
+            {
+                runnerActionsToRemove[RunnerAction.Name] = (RunnerAction, RunnerTokenEntity);
+                if (vagrantReplica != null)
+                {
+                    vagrantReplicaToRemove[vagrantReplica.Id] = vagrantReplica;
+                }
+            }
+        }
         foreach (var runnerRuntime in runnerRuntimeMap.Values)
         {
             foreach (var runner in runnerRuntime.Runners.Values.ToArray())
             {
-                if (runner.Status == RunnerStatus.Building && !building.ContainsKey(runner.Name))
+                if (vagrantReplicaToRemove.ContainsKey(runner.Name) ||
+                    runnerActionsToRemove.ContainsKey(runner.Name) ||
+                    (
+                        !buildingReplicaMap.ContainsKey(runner.Name) &&
+                        !executingReplicaMap.ContainsKey(runner.Name) &&
+                        (
+                            runner.RunnerAction == null ||
+                            runner.RunnerAction.Status == RunnerActionStatus.Offline ||
+                            runner.VagrantReplica == null ||
+                            runner.VagrantReplica.State == VagrantReplicaState.Off ||
+                            runner.VagrantReplica.State == VagrantReplicaState.NotCreated
+                        )
+                    ))
                 {
+                    if (runner.RunnerAction != null)
+                    {
+                        runnerActionsToRemove[runner.RunnerAction.Name] = (runner.RunnerAction, runnerRuntime.RunnerTokenEntity);
+                    }
+                    if (runner.VagrantReplica != null)
+                    {
+                        vagrantReplicaToRemove[runner.VagrantReplica.Id] = runner.VagrantReplica;
+                    }
                     runnerRuntime.Runners.Remove(runner.Name);
                 }
             }
         }
+        List<Task> deleteDanglingTasks = [];
+        foreach (var vagrantReplicaPair in vagrantReplicaToRemove)
+        {
+            deleteDanglingTasks.Add(Task.Run(async () =>
+            {
+                var id = vagrantReplicaPair.Value?.Id ?? vagrantReplicaPair.Key;
+                await DeleteRunnerVagrantReplica(id, vagrantService, stoppingToken);
+                _logger.LogInformation("Vagrant replica purged (dead replica): {name}", id);
+
+            }, stoppingToken));
+        }
+        foreach (var (RunnerAction, RunnerTokenEntity) in runnerActionsToRemove.Values)
+        {
+            deleteDanglingTasks.Add(Task.Run(async () =>
+            {
+                await DeleteRunnerAction(RunnerAction, RunnerTokenEntity, httpClient, stoppingToken);
+                _logger.LogInformation("Runner action purged (dead action): {name}", RunnerAction.Name);
+            }, stoppingToken));
+        }
+        await Task.WhenAll(deleteDanglingTasks);
 
         _logger.LogDebug("Removing outdated runners...");
+        List<Task> deleteAllOutdatedTasks = [];
         foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
             if (runnerRuntime.TokenRev == runnerRuntime.RunnerTokenEntity.Rev &&
@@ -597,66 +426,114 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            deleteAllOutdatedTasks.Add(Task.Run(async () =>
             {
-                if (runner.DockerContainer != null)
+                List<Task> deleteOutdatedTasks = [];
+                foreach (var runner in runnerRuntime.Runners.Values.ToArray())
                 {
-                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
+                    deleteOutdatedTasks.Add(Task.Run(async () =>
+                    {
+                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                        runnerRuntime.Runners.Remove(runner.Name);
+                        _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
+                    }, stoppingToken));
                 }
-                if (runner.RunnerAction != null)
+                await Task.WhenAll(deleteOutdatedTasks);
+                runnerRuntimeMap[runnerRuntime.RunnerId] = new()
                 {
-                    try
-                    {
-                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                    }
-                }
-                runnerRuntime.Runners.Remove(runner.Name);
-                _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
-            }
-            runnerRuntimeMap[runnerRuntime.RunnerId] = new()
-            {
-                TokenId = runnerRuntime.TokenId,
-                TokenRev = runnerRuntime.RunnerTokenEntity.Rev,
-                RunnerId = runnerRuntime.RunnerId,
-                RunnerRev = runnerRuntime.RunnerEntity.Rev,
-                RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
-                RunnerEntity = runnerRuntime.RunnerEntity,
-                Runners = runnerRuntime.Runners,
-            };
+                    TokenId = runnerRuntime.TokenId,
+                    TokenRev = runnerRuntime.RunnerTokenEntity.Rev,
+                    RunnerId = runnerRuntime.RunnerId,
+                    RunnerRev = runnerRuntime.RunnerEntity.Rev,
+                    RunnerTokenEntity = runnerRuntime.RunnerTokenEntity,
+                    RunnerEntity = runnerRuntime.RunnerEntity,
+                    Runners = runnerRuntime.Runners,
+                };
+            }, stoppingToken));
         }
+        await Task.WhenAll(deleteAllOutdatedTasks);
 
         _logger.LogDebug("Removing excess runners...");
+        List<Task> deleteAllExcessTasks = [];
         foreach (var runnerRuntime in runnerRuntimeMap.Values.ToArray())
         {
-            while (runnerRuntime.RunnerEntity.Count < runnerRuntime.Runners.Count)
+            int numExcess = runnerRuntime.Runners.Count - runnerRuntime.RunnerEntity.Replicas;
+            if (numExcess > 0)
             {
-                var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready) ??
-                    runnerRuntime.Runners.Values.FirstOrDefault();
-                if (runner == null)
+                List<RunnerInstance> runnerInstancesToRemove = [];
+                while (numExcess >= runnerInstancesToRemove.Count)
                 {
-                    break;
-                }
-                if (runner.DockerContainer != null)
-                {
-                    await dockerService.DeleteContainer(runnerRuntime.RunnerEntity.RunnerOS, runner.DockerContainer.Name);
-                }
-                if (runner.RunnerAction != null)
-                {
-                    try
+                    var runner = runnerRuntime.Runners.Values.FirstOrDefault(i => i.Status == RunnerStatus.Ready && !runnerInstancesToRemove.Contains(i)) ??
+                        runnerRuntime.Runners.Values.FirstOrDefault(i => !runnerInstancesToRemove.Contains(i));
+                    if (runner == null)
                     {
-                        (await Execute(httpClient, HttpMethod.Delete, runnerRuntime.RunnerTokenEntity, $"actions/runners/{runner.RunnerAction.Id}", stoppingToken)).ThrowIfError();
+                        break;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning("Action runner not deleted ({name}): {err}", runner.RunnerAction.Name, ex.Message);
-                    }
+                    runnerInstancesToRemove.Add(runner);
                 }
-                runnerRuntime.Runners.Remove(runner.Name);
-                _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
+                foreach (var runner in runnerInstancesToRemove)
+                {
+                    deleteAllExcessTasks.Add(Task.Run(async () =>
+                    {
+                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                        runnerRuntime.Runners.Remove(runner.Name);
+                        _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
+                    }, stoppingToken));
+                }
+            }
+        }
+        await Task.WhenAll(deleteAllExcessTasks);
+
+        _logger.LogDebug("Removing dangling builds...");
+        List<Task> deleteDanglingBuildsTasks = [];
+        foreach (var vagrantBuildPair in await vagrantService.GetBuilds(stoppingToken))
+        {
+            deleteDanglingBuildsTasks.Add(Task.Run(async () =>
+            {
+                string id = vagrantBuildPair.Value?.Id ?? vagrantBuildPair.Key;
+
+                string[] idSplit = id.Split('-');
+                if (idSplit.Length < 3 ||
+                    idSplit[0] == RunnerIdentifier ||
+                    idSplit[1] == runnerControllerId ||
+                    runnerRuntimeMap.ContainsKey(idSplit[2]))
+                {
+                    return;
+                }
+
+                await vagrantService.DeleteBuild(id, stoppingToken);
+                _logger.LogInformation("Runner vagrant build (dangling): {name}", id);
+
+            }, stoppingToken));
+        }
+        await Task.WhenAll(deleteDanglingBuildsTasks);
+
+        _logger.LogDebug("Updating runtime runner instance status...");
+        foreach (var runnerRuntime in runnerRuntimeMap.Values)
+        {
+            foreach (var runner in runnerRuntime.Runners.Values.ToArray())
+            {
+                RunnerStatus runnerStatus = RunnerStatus.Building;
+                if (runner.VagrantReplica != null && runner.RunnerAction != null)
+                {
+                    runnerStatus = runner.RunnerAction.Status switch
+                    {
+                        RunnerActionStatus.Busy => RunnerStatus.Busy,
+                        RunnerActionStatus.Ready => RunnerStatus.Ready,
+                        _ => RunnerStatus.Starting
+                    };
+                }
+                else if (runner.VagrantReplica != null && runner.RunnerAction == null)
+                {
+                    runnerStatus = RunnerStatus.Starting;
+                }
+                runnerRuntime.Runners[runner.Name] = new()
+                {
+                    Name = runner.Name,
+                    VagrantReplica = runner.VagrantReplica,
+                    RunnerAction = runner.RunnerAction,
+                    Status = runnerStatus
+                };
             }
         }
 
@@ -667,40 +544,87 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
-            if (runnerRuntime.RunnerEntity.Count > runnerRuntime.Runners.Count)
+            if (runnerRuntime.RunnerEntity.Replicas > runnerRuntime.Runners.Count)
             {
-                IPAddress hostAddress = Dns.GetHostAddresses("host.docker.internal")[0];
-                string? regToken = null;
-                try
-                {
-                    var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
-                    tokenResponse.ThrowIfErrorOrHasNoValue();
-                    regToken = tokenResponse.Value["token"];
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogInformation("Runner register token error: {ex}", ex.Message);
-                    continue;
-                }
-
                 var runners = runnerRuntime.Runners.ToArray();
-                var runnerRev = runnerRuntime.RunnerRev;
-                var runnerTokenRev = runnerRuntime.TokenRev;
+                var rev = $"{runnerRuntime.TokenRev}-{runnerRuntime.RunnerRev}";
 
-                for (int i = 0; i < (runnerRuntime.RunnerEntity.Count - runners.Length); i++)
+                for (int i = 0; i < (runnerRuntime.RunnerEntity.Replicas - runners.Length); i++)
                 {
-                    string name = $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}-{runnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                    try
+                    string id = $"{RunnerIdentifier}-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
+                    string replicaId = $"{id}-{runnerRuntime.RunnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
+                    string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllTextAsync(stoppingToken);
+                    string baseVagrantBuildId = $"{id}-base";
+                    string vagrantBuildId = $"{id}";
+                    string runnerId = runnerRuntime.RunnerEntity.Id;
+                    int cpus = runnerRuntime.RunnerEntity.Cpus;
+                    int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
+                    RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
+                    string runnerOsStr = runnerOs switch
                     {
-                        runnerRuntime.Runners[name] = new RunnerInstance()
-                        {
-                            Name = name,
-                            DockerContainer = null,
-                            RunnerAction = null,
-                            Status = RunnerStatus.Building
-                        };
-                        string inputArgs = $"--name {name} --url {GetConfigUrl(runnerToken)} --ephemeral --unattended";
-                        inputArgs += $" --token {regToken}";
+                        RunnerOSType.Linux => "linux",
+                        RunnerOSType.Windows => "windows",
+                        _ => throw new NotSupportedException()
+                    };
+
+                    runnerRuntime.Runners[replicaId] = new RunnerInstance()
+                    {
+                        Name = replicaId,
+                        VagrantReplica = null,
+                        RunnerAction = null,
+                        Status = RunnerStatus.Building
+                    };
+
+                    _logger.LogInformation("Runner preparing: {id}", replicaId);
+
+                    string bootstrapInputScript;
+                    if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
+                    {
+                        bootstrapInputScript = $$"""
+                            mkdir "/r"
+                            cd "/r"                
+                            RUNNER_VERSION={{GithubRunnerVersion}}
+                            curl -fSL --output /tmp/actions-runner-linux-x64.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
+                            RUNNER_SHA256='{{GithubRunnerLinuxSHA256}}'
+                            echo "$RUNNER_SHA256 /tmp/actions-runner-linux-x64.tar.gz" | sha256sum -c -
+                            tar -xzf /tmp/actions-runner-linux-x64.tar.gz -C /r
+                            ./bin/installdependencies.sh
+                            """;
+                    }
+                    else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
+                    {
+                        bootstrapInputScript = $$"""
+                            $ErrorActionPreference='Stop'; $verbosePreference='Continue'; $ProgressPreference = "SilentlyContinue"
+                            mkdir "C:\\r"
+                            cd "C:\\r"
+                            $RUNNER_VERSION = "{{GithubRunnerVersion}}"
+                            Invoke-WebRequest "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-win-x64-${RUNNER_VERSION}.zip" -OutFile "${env:TEMP}\\actions-runner-win-x64.zip" -UseBasicParsing;
+                            $RUNNER_SHA256 = '{{GithubRunnerWindowsSHA256}}';
+                            if ((Get-FileHash "${env:TEMP}\\actions-runner-win-x64.zip" -Algorithm sha256).Hash -ne $RUNNER_SHA256) {
+                              Write-Host 'RUNNER_SHA256 CHECKSUM VERIFICATION FAILED!';
+                              exit 1;
+                            };
+                            Expand-Archive "${env:TEMP}\\actions-runner-win-x64.zip" -DestinationPath c:\\r -Force;
+                            """;
+                    }
+                    else
+                    {
+                        throw new NotSupportedException();
+                    }
+
+                    Dictionary<string, string> labels = [];
+                    labels["baseVagrantBuildId"] = baseVagrantBuildId;
+                    labels["vagrantBuildId"] = vagrantBuildId;
+                    labels["runnerId"] = runnerId;
+                    labels["tokenRev"] = runnerRuntime.TokenRev.ToLowerInvariant();
+                    labels["runnerRev"] = runnerRuntime.RunnerRev.ToLowerInvariant();
+
+                    async Task<string> runnerInputScriptFactory()
+                    {
+                        var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
+                        tokenResponse.ThrowIfErrorOrHasNoValue();
+                        string regToken = tokenResponse.Value["token"];
+                        string inputArgs = $"--name {replicaId} --url {GetConfigUrl(runnerToken)} --work w --disableupdate --ephemeral --unattended --token {regToken}";
                         if (runnerRuntime.RunnerEntity.Labels.Length != 0)
                         {
                             inputArgs += $" --no-default-labels --labels {string.Join(',', runnerRuntime.RunnerEntity.Labels)}";
@@ -709,103 +633,128 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             inputArgs += $" --runnergroup {runnerRuntime.RunnerEntity.Group}";
                         }
-                        _logger.LogInformation("Runner preparing: {id}", name);
-                        RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
-                        string runnerOsStr = runnerOs switch
-                        {
-                            RunnerOSType.Linux => "linux",
-                            RunnerOSType.Windows => "windows",
-                            _ => throw new NotSupportedException()
-                        };
-                        string image = runnerRuntime.RunnerEntity.Image;
-                        string runnerId = runnerRuntime.RunnerEntity.Id;
-                        var baseImage = $"managed_runner-{runnerControllerId}-{runnerId}-base:latest";
-                        var actualImage = $"managed_runner-{runnerControllerId}-{runnerId}:latest";
-                        int cpus = runnerRuntime.RunnerEntity.Cpus;
-                        int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
-                        string input;
-                        string dockerArgs = "";
-                        string dockerfile = $"""
-                            FROM {baseImage}
-                            COPY ./HostAssets/{runnerOsStr} /runner
-
-                            """;
+                        string inputScript;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
-                            dockerfile += $"""
-                                WORKDIR "/runner"
-                                SHELL ["/bin/bash", "-c"]
-                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
-                                RUN tar xzf ./actions-runner-linux-x64.tar.gz
-                                RUN sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
-                                RUN ./bin/installdependencies.sh
-                                """;
-                            input = NormalizeDockerInput($"""
-                                echo '{hostAddress} host.docker.internal' | sudo tee -a /etc/hosts
-                                cd /runner
-                                ./config.sh {inputArgs}
-                                ./run.sh
-                                """, runnerRuntime.RunnerEntity.RunnerOS);
+                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                                export RUNNER_ALLOW_RUNASROOT=1
+                                cd "/r"
+                                sudo -E ./config.sh {inputArgs}
+                                sudo -E ./run.sh
+                                sudo shutdown -h now
+                                """);
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
-                            dockerfile += $"""
-                                WORKDIR "C:\runner"
-                                SHELL ["powershell"]
-                                ENV ACTIONS_CACHE_URL="http://host.docker.internal:3000/{runnerControllerId}/"
-                                RUN Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -Path "$PWD/actions-runner-win-x64.zip").Path, (Resolve-Path -Path "$PWD").Path)
-                                RUN [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
-                                """;
-                            input = NormalizeDockerInput($"""
-                                $ErrorActionPreference='Stop' ; $verbosePreference='Continue'
-                                Add-Content -Path $env:windir\System32\drivers\etc\hosts -Value "`n{hostAddress}`thost.docker.internal" -Force
-                                cd C:\runner
+                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                                $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
+                                $env:RUNNER_ALLOW_RUNASROOT=1
+                                cd "C:\r"
                                 ./config.cmd {inputArgs}
                                 ./run.cmd
-                                """, runnerRuntime.RunnerEntity.RunnerOS);
+                                shutdown /s /f
+                                """);
                         }
                         else
                         {
                             throw new NotSupportedException();
                         }
-                        dockerArgs += $" -l \"cicd.self_runner_id={runnerRuntime.RunnerEntity.Id}\"";
-                        dockerArgs += $" -l \"cicd.self_runner_rev={runnerRev}\"";
-                        dockerArgs += $" -l \"cicd.self_runner_token_rev={runnerTokenRev}\"";
-                        dockerArgs += $" -l \"cicd.self_runner_name={name}\"";
-                        dockerArgs += $" -e \"RUNNER_ALLOW_RUNASROOT=1\"";
-                        var actionsRunnerDockerfile = (ActionsRunnerDockerfilesDir / $"managed_runner-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}");
-                        await actionsRunnerDockerfile.WriteAllTextAsync(dockerfile, stoppingToken);
+                        return inputScript;
+                    }
 
+                    try
+                    {
                         async void run()
                         {
                             try
                             {
-                                building[name] = runnerRuntime.Runners[name];
-                                await executorLocker.Execute(actualImage, async () =>
+                                buildingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
+                                await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    await dockerService.Build(runnerOs, image, baseImage);
-                                    await dockerService.Build(runnerOs, actionsRunnerDockerfile, actualImage);
-                                    await dockerService.Run(runnerOs, name, actualImage, runnerId, cpus, memoryGB, input, dockerArgs);
+                                    string baseRev;
+                                    try
+                                    {
+                                        var baseBuild = await vagrantService.Build(baseVagrantBuildId, "base", baseVagrantfile, stoppingToken);
+                                        baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
+                                    }
+                                    catch
+                                    {
+                                        try
+                                        {
+                                            await vagrantService.DeleteBuild(baseVagrantBuildId, stoppingToken);
+                                        }
+                                        catch { }
+                                        throw;
+                                    }
+                                    try
+                                    {
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, bootstrapInputScript, stoppingToken);
+                                    }
+                                    catch
+                                    {
+                                        try
+                                        {
+                                            await vagrantService.DeleteBuild(vagrantBuildId, stoppingToken);
+                                        }
+                                        catch { }
+                                        throw;
+                                    }
 
-                                    _logger.LogInformation("Runner created (up): {id}", name);
+                                    executingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
+                                    async void execute()
+                                    {
+                                        try
+                                        {
+                                            try
+                                            {
+                                                _logger.LogInformation("Runner starting OS: {id}", replicaId);
+
+                                                await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                throw new Exception($"Runner rev run error on {replicaId}: {ex.Message}");
+                                            }
+
+                                            _logger.LogInformation("Runner created (up): {id}", replicaId);
+
+                                            try
+                                            {
+                                                await vagrantService.Execute(runnerOs, replicaId, runnerInputScriptFactory, stoppingToken);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                throw new Exception($"Runner rev execute error on {replicaId}: {ex.Message}");
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogError("{ex}", ex.Message);
+                                        }
+                                        finally
+                                        {
+                                            executingReplicaMap.Remove(replicaId, out _);
+                                        }
+                                    }
+                                    execute();
                                 });
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogInformation("Runner rev run error: {ex}", ex.Message);
-                                runnerRuntime.Runners.Remove(name);
+                                _logger.LogError("Runner rev build error on {}: {ex}", replicaId, ex.Message);
+                                runnerRuntime.Runners.Remove(replicaId);
                             }
                             finally
                             {
-                                building.Remove(name, out _);
+                                buildingReplicaMap.Remove(replicaId, out _);
                             }
                         }
                         run();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogInformation("Runner rev init error: {ex}", ex.Message);
-                        runnerRuntime.Runners.Remove(name);
+                        _logger.LogError("Runner rev init error on {}: {ex}", replicaId, ex.Message);
+                        runnerRuntime.Runners.Remove(replicaId);
                     }
                 }
             }
@@ -828,28 +777,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerTokenEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerTokenEntity.GithubToken);
         return await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken);
-    }
-
-    private static string NormalizeDockerInput(string input, RunnerOSType runnerOS)
-    {
-        if (runnerOS == RunnerOSType.Linux)
-        {
-            return input.Replace("\n\r", " && ")
-                .Replace("\r\n", " && ")
-                .Replace("\n", " && ")
-                .Replace("\"", "\\\"");
-        }
-        else if (runnerOS == RunnerOSType.Windows)
-        {
-            return input.Replace("\n\r", " ; ")
-                .Replace("\r\n", " ; ")
-                .Replace("\n", " ; ")
-                .Replace("\"", "\\\"");
-        }
-        else
-        {
-            throw new NotSupportedException();
-        }
     }
 
     private static string GetEndpoint(RunnerTokenEntity runnerTokenEntity, string segement)
@@ -881,6 +808,80 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         else
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
+        }
+    }
+
+    private static string NormalizeScriptInput(RunnerOSType runnerOS, string input)
+    {
+        if (runnerOS == RunnerOSType.Linux)
+        {
+            return input.Replace("\n\r", " && ")
+                .Replace("\r\n", " && ")
+                .Replace("\n", " && ")
+                .Replace("\"", "\\\"");
+        }
+        else if (runnerOS == RunnerOSType.Windows)
+        {
+            return input.Replace("\n\r", " ; ")
+                .Replace("\r\n", " ; ")
+                .Replace("\n", " ; ")
+                .Replace("\"", "\\\"");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    private static AbsolutePath GetPath(string path)
+    {
+        AbsolutePath absolutePath;
+
+        if (Path.IsPathRooted(path))
+        {
+            absolutePath = path;
+        }
+        else
+        {
+            absolutePath = AbsolutePath.Create(Environment.CurrentDirectory) / path;
+        }
+
+        if (!absolutePath.FileExists())
+        {
+            throw new Exception($"\"{path}\" does not exists");
+        }
+
+        return absolutePath;
+    }
+
+    private async Task DeleteRunner(RunnerInstance runner, RunnerTokenEntity runnerTokenEntity, VagrantService vagrantService, HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        List<Task> runnerDeleteTasks = [];
+        runnerDeleteTasks.Add(DeleteRunnerAction(runner.RunnerAction, runnerTokenEntity, httpClient, cancellationToken));
+        runnerDeleteTasks.Add(DeleteRunnerVagrantReplica(runner.VagrantReplica?.Id, vagrantService, cancellationToken));
+        await Task.WhenAll(runnerDeleteTasks);
+    }
+
+    private async Task DeleteRunnerAction(RunnerAction? runnerAction, RunnerTokenEntity runnerTokenEntity, HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        if (runnerAction != null)
+        {
+            try
+            {
+                (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runnerAction.Id}", cancellationToken)).ThrowIfError();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Action runner not deleted ({name}): {err}", runnerAction.Name, ex.Message);
+            }
+        }
+    }
+
+    private async Task DeleteRunnerVagrantReplica(string? vagrantReplicaId, VagrantService vagrantService, CancellationToken cancellationToken)
+    {
+        if (vagrantReplicaId != null)
+        {
+            await vagrantService.DeleteReplica(vagrantReplicaId, cancellationToken);
         }
     }
 }

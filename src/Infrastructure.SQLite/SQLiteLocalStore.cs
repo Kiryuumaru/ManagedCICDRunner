@@ -1,4 +1,5 @@
-﻿using Application.Common;
+﻿using Application;
+using Application.Common;
 using Microsoft.Extensions.DependencyInjection;
 using SQLite;
 using SQLitePCL;
@@ -8,11 +9,12 @@ namespace Infrastructure.SQLite;
 
 internal class SQLiteLocalStore
 {
-    //private readonly SQLiteAsyncConnection _db = new(AbsolutePath.Parse(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)) / "netconduit.dat");
-    private readonly SQLiteAsyncConnection _db = new(AbsolutePath.Parse(Environment.CurrentDirectory) / "dat.dat");
+    private static readonly AbsolutePath _dbPath = Defaults.DataPath / ".db";
+    private readonly SQLiteAsyncConnection _db = new(_dbPath);
 
     private async Task Bootstrap()
     {
+        _dbPath.Parent.CreateDirectory();
         await _db.CreateTableAsync<SQLiteDataHolder>();
     }
 

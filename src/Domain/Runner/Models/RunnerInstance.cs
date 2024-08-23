@@ -1,6 +1,6 @@
-﻿using Domain.Docker.Models;
-using Domain.Runner.Entities;
+﻿using Domain.Runner.Entities;
 using Domain.Runner.Enums;
+using Domain.Vagrant.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,7 +15,7 @@ public class RunnerInstance
 
     public required RunnerAction? RunnerAction { get; init; }
 
-    public required DockerContainer? DockerContainer { get; init; }
+    public required VagrantReplica? VagrantReplica { get; init; }
 
     public required RunnerStatus Status { get; init; }
 }

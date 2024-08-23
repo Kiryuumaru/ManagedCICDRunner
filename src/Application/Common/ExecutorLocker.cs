@@ -13,16 +13,14 @@ internal class ExecutorLocker
         public int Count { get; set; }
     }
 
-    private readonly Dictionary<string, SemaphoreSlimTracker> lockers = [];
-    private readonly SemaphoreSlim lockersLocker = new(1);
+    private readonly Dictionary<string, SemaphoreSlimTracker> _lockers = [];
+    private readonly SemaphoreSlim _lockersLocker = new(1);
 
-    public async Task Execute(string key, Func<Task> execute)
+    public async Task Execute(string[] keys, Func<Task> execute)
     {
-        var locker = await Get(key);
-
         try
         {
-            await locker.WaitAsync();
+            await Wait(keys);
             await execute();
         }
         catch
@@ -31,47 +29,51 @@ internal class ExecutorLocker
         }
         finally
         {
-            locker.Release();
+            await Release(keys);
         }
-
-        await Delete(key);
     }
 
-    private async Task<SemaphoreSlimTracker> Get(string key)
+    public Task Execute(string key, Func<Task> execute)
     {
-        SemaphoreSlimTracker? locker;
-        try
-        {
-            await lockersLocker.WaitAsync();
-            if (!lockers.TryGetValue(key, out locker))
-            {
-                locker = new(1);
-                lockers.Add(key, locker);
-            }
-            locker.Count++;
-        }
-        catch
-        {
-            throw;
-        }
-        finally
-        {
-            lockersLocker.Release();
-        }
-        return locker;
+        return Execute([key], execute);
     }
 
-    private async Task Delete(string key)
+    private async Task Wait(string[] keys)
     {
+        List<SemaphoreSlimTracker> lockers = [];
+        List<Task> tasks = [];
         try
         {
-            await lockersLocker.WaitAsync();
-            if (lockers.TryGetValue(key, out SemaphoreSlimTracker? locker))
+            await _lockersLocker.WaitAsync();
+            foreach (var key in keys)
             {
-                locker.Count--;
-                if (locker.Count <= 0)
+                if (!_lockers.TryGetValue(key, out var locker))
                 {
-                    lockers.Remove(key);
+                    locker = new(1);
+                    _lockers.Add(key, locker);
+                }
+                locker.Count++;
+                lockers.Add(locker);
+                tasks.Add(locker.WaitAsync());
+            }
+            while (true)
+            {
+                bool isAllWaited = true;
+                List<Task> isAllWaitedTasks = [];
+                foreach (var locker in lockers)
+                {
+                    isAllWaitedTasks.Add(Task.Run(async () =>
+                    {
+                        if (await locker.WaitAsync(10))
+                        {
+                            isAllWaited = false;
+                        }
+                    }));
+                }
+                await Task.WhenAll(isAllWaitedTasks);
+                if (isAllWaited)
+                {
+                    break;
                 }
             }
         }
@@ -81,7 +83,36 @@ internal class ExecutorLocker
         }
         finally
         {
-            lockersLocker.Release();
+            _lockersLocker.Release();
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task Release(string[] keys)
+    {
+        try
+        {
+            await _lockersLocker.WaitAsync();
+            foreach (var key in keys)
+            {
+                if (_lockers.TryGetValue(key, out SemaphoreSlimTracker? locker))
+                {
+                    locker.Count--;
+                    if (locker.Count <= 0)
+                    {
+                        _lockers.Remove(key);
+                    }
+                    locker.Release();
+                }
+            }
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            _lockersLocker.Release();
         }
     }
 }

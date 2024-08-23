@@ -15,7 +15,7 @@ namespace Application.Common;
 
 public class AbsolutePath
 {
-    public static AbsolutePath Parse(string path)
+    public static AbsolutePath Create(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -48,7 +48,7 @@ public class AbsolutePath
     {
         get
         {
-            return Parse(Directory.GetParent(Path)!.ToString());
+            return Create(Directory.GetParent(Path)!.ToString());
         }
     }
 
@@ -58,6 +58,15 @@ public class AbsolutePath
         get
         {
             return System.IO.Path.GetFileNameWithoutExtension(Path);
+        }
+    }
+
+    [JsonIgnore]
+    public string Name
+    {
+        get
+        {
+            return System.IO.Path.GetFileName(Path);
         }
     }
 
@@ -115,13 +124,15 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
+        if (!DirectoryExists()) return [];
+
         if (depth == 0)
             return [];
 
         var files = Directory.EnumerateFiles(Path, pattern, SearchOption.TopDirectoryOnly)
             .Where(x => (File.GetAttributes(x) & attributes) == attributes)
             .OrderBy(x => x)
-            .Select(Parse);
+            .Select(Create);
 
         return files.Concat(GetDirectories(depth: depth - 1).SelectMany(x => x.GetFiles(pattern, attributes: attributes)));
     }
@@ -131,20 +142,23 @@ public class AbsolutePath
         int depth = 1,
         FileAttributes attributes = 0)
     {
-        var paths = new string[] { Path };
-        while (paths.Length != 0 && depth > 0)
+        if (DirectoryExists())
         {
-            var matchingDirectories = paths
-                .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
-                .Where(x => (File.GetAttributes(x) & attributes) == attributes)
-                .OrderBy(x => x)
-                .Select(Parse).ToList();
+            var paths = new string[] { Path };
+            while (paths.Length != 0 && depth > 0)
+            {
+                var matchingDirectories = paths
+                    .SelectMany(x => Directory.EnumerateDirectories(x, pattern, SearchOption.TopDirectoryOnly))
+                    .Where(x => (File.GetAttributes(x) & attributes) == attributes)
+                    .OrderBy(x => x)
+                    .Select(Create).ToList();
 
-            foreach (var matchingDirectory in matchingDirectories)
-                yield return matchingDirectory;
+                foreach (var matchingDirectory in matchingDirectories)
+                    yield return matchingDirectory;
 
-            depth--;
-            paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+                depth--;
+                paths = paths.SelectMany(x => Directory.GetDirectories(x, "*", SearchOption.TopDirectoryOnly)).ToArray();
+            }
         }
     }
 
@@ -182,66 +196,6 @@ public class AbsolutePath
             Parent.CreateDirectory();
         }
         await Task.Run(() => File.WriteAllTextAsync(Path, JsonSerializer.Serialize(obj, jsonSerializerOptions), cancellationToken), cancellationToken);
-    }
-
-    public async Task LockFile(CancellationToken unlockToken)
-    {
-        Directory.CreateDirectory(Parent);
-        var fileLock = new FileStream(Path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        await fileLock.WriteAsync(Array.Empty<byte>(), unlockToken);
-        await fileLock.FlushAsync(unlockToken);
-        async void watchLock()
-        {
-            await unlockToken.WhenCanceled();
-            fileLock.Close();
-        }
-        watchLock();
-    }
-
-    public async Task ClaimFile(CancellationToken unclaimToken)
-    {
-        Directory.CreateDirectory(Parent);
-        Guid guid = Guid.NewGuid();
-        string guidStr = guid.ToString();
-        bool hasClaimed = false;
-        try
-        {
-            await File.WriteAllTextAsync(Path, guidStr, unclaimToken);
-            await Task.Delay(1000, unclaimToken);
-            var currentGuidStr = await File.ReadAllTextAsync(Path, unclaimToken);
-            if (currentGuidStr == guidStr)
-            {
-                hasClaimed = true;
-            }
-        }
-        catch { }
-        if (hasClaimed)
-        {
-            async void watchClaim()
-            {
-                while (!unclaimToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await File.WriteAllTextAsync(Path, guidStr, unclaimToken);
-                    }
-                    catch { }
-                    finally
-                    {
-                        try
-                        {
-                            await Task.Delay(250, unclaimToken);
-                        }
-                        catch { }
-                    }
-                }
-            }
-            watchClaim();
-        }
-        else
-        {
-            throw new Exception($"{Path} was already claimed.");
-        }
     }
 
     public void CreateDirectory()
