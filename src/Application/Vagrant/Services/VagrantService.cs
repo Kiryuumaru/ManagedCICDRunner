@@ -492,7 +492,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
                 await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
-                await dir.DeleteRecursively();
+                await dir.Delete();
 
                 break;
             }
@@ -595,7 +595,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 var vagrantCreatedDir = dir / ".vagrant";
 
                 await WaitKill(vagrantCreatedDir, cancellationToken);
-                await vagrantCreatedDir.DeleteRecursively();
+                await vagrantCreatedDir.Delete();
 
                 break;
             }
@@ -664,8 +664,8 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             try
             {
-                var processes = await path.GetProcessRecursively();
-                if (processes.Count == 0)
+                var processes = await path.GetProcesses();
+                if (processes.Length == 0)
                 {
                     break;
                 }

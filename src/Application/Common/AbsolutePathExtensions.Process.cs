@@ -10,7 +10,7 @@ public static partial class AbsolutePathExtensions
     /// </summary>
     /// <param name="path">The path to the file or directory to check for locked files.</param>
     /// <returns>A task representing the asynchronous operation that returns a list of processes locking the file(s).</returns>
-    public static async Task<List<Process>> GetProcessRecursively(this AbsolutePath path)
+    public static async Task<Process[]> GetProcesses(this AbsolutePath path)
     {
         List<Process> processes = [];
         await Task.Run(() =>
@@ -29,7 +29,7 @@ public static partial class AbsolutePathExtensions
                 }
             }
         });
-        return processes;
+        return [.. processes];
     }
 
     private static List<Process> WhoIsLocking(string path)
