@@ -111,7 +111,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 string name = string.IsNullOrEmpty(runnerToken.GithubOrg) ? "" : $"{runnerToken.GithubOrg}/";
                 name += string.IsNullOrEmpty(runnerToken.GithubRepo) ? "" : $"{runnerToken.GithubRepo}";
                 name = name.Trim('/');
-                _logger.LogError("Error fetching runners for runner token {}: {}", name, runnerListResult.Error!.Message);
+                throw new Exception($"Error fetching runners for runner token {name}: {runnerListResult.Error!.Message}");
             }
             List<RunnerAction> runnerActions = [];
             if (runnerListResult.HasValue)
