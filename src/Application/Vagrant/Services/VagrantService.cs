@@ -138,6 +138,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 Vagrant.configure("2") do |config|
                   config.vm.box = "{baseBuildId}"
                   config.vm.guest = {vmGuest}
+                  config.vm.boot_timeout = 1800
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
@@ -321,6 +322,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 Vagrant.configure("2") do |config|
                   config.vm.box = "{buildId}"
                   config.vm.guest = {vmGuest}
+                  config.vm.boot_timeout = 1800
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
