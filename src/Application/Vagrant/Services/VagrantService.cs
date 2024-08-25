@@ -426,11 +426,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         string replicaRev = revProp.GetString()!;
         var replicaLabels = labelsProp.EnumerateObject().ToDictionary(i => i.Name, i => i.Value.GetString()!)!;
 
-        VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
-        await locker.Execute(replicaId, async () =>
-        {
-            vagrantReplicaState = await GetStateCore(dir, cancellationToken);
-        });
+        VagrantReplicaState vagrantReplicaState = await GetStateCore(dir, cancellationToken);
 
         return new()
         {
@@ -547,7 +543,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 string? vmId = null;
                 try
                 {
-                    var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], dir, stoppingToken: ctxTimed);
+                    var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: ctxTimed);
                     var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
                     foreach (var prop in getVmJson.RootElement.EnumerateArray())
                     {
@@ -564,14 +560,14 @@ public class VagrantService(ILogger<VagrantService> logger)
                 {
                     try
                     {
-                        await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-TurnOff", "-Force"], dir, stoppingToken: ctxTimed);
+                        await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-TurnOff", "-Force"], stoppingToken: ctxTimed);
                     }
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
                         try
                         {
-                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmId}\").State"], dir, stoppingToken: ctxTimed);
+                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmId}\").State"], stoppingToken: ctxTimed);
                             if (result.Trim().Equals("off", StringComparison.InvariantCultureIgnoreCase))
                             {
                                 break;
@@ -584,14 +580,14 @@ public class VagrantService(ILogger<VagrantService> logger)
                     }
                     try
                     {
-                        await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], dir, stoppingToken: ctxTimed);
+                        await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], stoppingToken: ctxTimed);
                     }
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
                         try
                         {
-                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmId], dir, stoppingToken: ctxTimed);
+                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmId], stoppingToken: ctxTimed);
                         }
                         catch
                         {
@@ -621,14 +617,14 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         try
         {
-            var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], vagrantDir, stoppingToken: cancellationToken);
+            var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: cancellationToken);
             var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
             foreach (var prop in getVmJson.RootElement.EnumerateArray())
             {
                 var vmName = prop!.GetProperty("Name").GetString()!;
                 if (prop!.GetProperty("Name").GetString()!.StartsWith($"{vagrantDir.Name}_default_", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], vagrantDir, stoppingToken: cancellationToken)).Trim();
+                    var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], stoppingToken: cancellationToken)).Trim();
                     vagrantReplicaState = vmState.ToLowerInvariant() switch
                     {
                         "off" => VagrantReplicaState.Off,
