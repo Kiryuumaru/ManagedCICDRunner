@@ -541,7 +541,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             try
             {
-                var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(2));
+                var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromSeconds(30));
                 string? vmId = null;
                 try
                 {
@@ -596,6 +596,11 @@ public class VagrantService(ILogger<VagrantService> logger)
                             break;
                         }
                     }
+                }
+
+                if (ctxTimed.IsCancellationRequested)
+                {
+                    continue;
                 }
 
                 var vagrantCreatedDir = dir / ".vagrant";
