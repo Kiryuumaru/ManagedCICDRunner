@@ -22,6 +22,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TransactionHelpers;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Application.Vagrant.Services;
 
@@ -554,6 +555,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                         if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
                         {
                             vmId = vmName;
+                            break;
                         }
                     }
                 }
@@ -616,38 +618,34 @@ public class VagrantService(ILogger<VagrantService> logger)
     private async Task<VagrantReplicaState> GetStateCore(AbsolutePath vagrantDir, CancellationToken cancellationToken)
     {
         VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
-        await foreach (var commandEvent in Cli.RunListen("vagrant", ["status", "--machine-readable"], vagrantDir, stoppingToken: cancellationToken))
+
+        try
         {
-            string line = "";
-            switch (commandEvent)
+            var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], vagrantDir, stoppingToken: cancellationToken);
+            var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
+            foreach (var prop in getVmJson.RootElement.EnumerateArray())
             {
-                case StandardOutputCommandEvent outEvent:
-                    _logger.LogDebug("{x}", outEvent.Text);
-                    line = outEvent.Text;
-                    break;
-                case StandardErrorCommandEvent errEvent:
-                    _logger.LogDebug("{x}", errEvent.Text);
-                    line = errEvent.Text;
-                    break;
-            }
-            if (!string.IsNullOrEmpty(line))
-            {
-                string[] split = line.Split(',');
-                if (split.Length > 3 && split[2].Equals("state", StringComparison.InvariantCultureIgnoreCase))
+                var vmName = prop!.GetProperty("Name").GetString()!;
+                if (prop!.GetProperty("Name").GetString()!.StartsWith($"{vagrantDir.Name}_default_", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    vagrantReplicaState = split[3].ToLowerInvariant() switch
+                    var vmState = prop!.GetProperty("State").GetString()!;
+                    vagrantReplicaState = vmState.ToLowerInvariant() switch
                     {
-                        "not_created" => VagrantReplicaState.NotCreated,
                         "off" => VagrantReplicaState.Off,
-                        "poweroff" => VagrantReplicaState.Off,
                         "stopping" => VagrantReplicaState.Off,
+                        "saved" => VagrantReplicaState.Off,
+                        "paused" => VagrantReplicaState.Off,
+                        "reset" => VagrantReplicaState.Off,
                         "running" => VagrantReplicaState.Running,
                         "starting" => VagrantReplicaState.Starting,
-                        _ => throw new NotImplementedException($"{split[3]} is not implemented as VagrantReplicaState")
+                        _ => throw new NotImplementedException($"{vmState} is not implemented as VagrantReplicaState")
                     };
+                    break;
                 }
             }
         }
+        catch { }
+
         return vagrantReplicaState;
     }
 
