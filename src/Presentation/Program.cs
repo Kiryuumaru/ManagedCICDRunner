@@ -24,7 +24,7 @@ else if (args.Any(i => i.Equals("--uninstall-service", StringComparison.Invarian
 }
 else if (args.Any(i => i.Equals("--logs-service", StringComparison.InvariantCultureIgnoreCase)))
 {
-    await foreach (var commandEvent in Cli.RunListen($"\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell\" -c \"Get-Content -Path \"svc.combined.log\" -Wait\"", stoppingToken: cts.Token))
+    await foreach (var commandEvent in Cli.RunListen("powershell", ["Get-Content", "-Path", "svc.combined.log", "-Wait"], stoppingToken: cts.Token))
     {
         switch (commandEvent)
         {
