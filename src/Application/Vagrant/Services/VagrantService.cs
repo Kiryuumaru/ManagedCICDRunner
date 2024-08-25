@@ -628,7 +628,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 var vmName = prop!.GetProperty("Name").GetString()!;
                 if (prop!.GetProperty("Name").GetString()!.StartsWith($"{vagrantDir.Name}_default_", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    var vmState = prop!.GetProperty("State").GetString()!;
+                    var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], vagrantDir, stoppingToken: cancellationToken)).Trim();
                     vagrantReplicaState = vmState.ToLowerInvariant() switch
                     {
                         "off" => VagrantReplicaState.Off,
