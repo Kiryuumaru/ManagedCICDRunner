@@ -493,7 +493,10 @@ public class VagrantService(ILogger<VagrantService> logger)
 
                 await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
-                await DeleteVagrant(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                if ((dir / "Vagrantfile").DirectoryExists())
+                {
+                    await DeleteVagrant(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                }
 
                 await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
