@@ -325,7 +325,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             if (vagrantReplicaPair.Value == null)
             {
-                _logger.LogInformation("1Added remove empty: {}", vagrantReplicaPair.Key);
                 vagrantReplicaToRemove[vagrantReplicaPair.Key] = null;
             }
             else
@@ -340,7 +339,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         RunnerAction.Status == RunnerActionStatus.Offline
                     ))
                 {
-                    _logger.LogInformation("0Added remove not tracked off: {}, {}, {}", vagrantReplicaPair.Value.Id, vagrantReplicaPair.Value.State, RunnerAction?.Status);
                     vagrantReplicaToRemove[vagrantReplicaPair.Value.Id] = vagrantReplicaPair.Value;
                     if (RunnerAction != null)
                     {
@@ -364,7 +362,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 runnerActionsToRemove[RunnerAction.Name] = (RunnerAction, RunnerTokenEntity);
                 if (vagrantReplica != null)
                 {
-                    _logger.LogInformation("1Added remove not tracked off: {}, {}, {}", vagrantReplica.Id, vagrantReplica.State, RunnerAction.Status);
                     vagrantReplicaToRemove[vagrantReplica.Id] = vagrantReplica;
                 }
             }
@@ -393,7 +390,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     if (runner.VagrantReplica != null)
                     {
-                        _logger.LogInformation("2Added remove not tracked off: {}, {}, {}", runner.VagrantReplica.Id, runner.VagrantReplica.State, runner.RunnerAction?.Status);
                         vagrantReplicaToRemove[runner.VagrantReplica.Id] = runner.VagrantReplica;
                     }
                     runnerRuntime.Runners.Remove(runner.Name);

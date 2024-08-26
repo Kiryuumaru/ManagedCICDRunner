@@ -364,44 +364,49 @@ public class VagrantService(ILogger<VagrantService> logger)
             throw new NotSupportedException();
         }
 
+        bool isLocked = false;
+        var executeTask = Task.Run(async () =>
+        {
+            while (!isLocked)
+            {
+                await Task.Delay(500, cancellationToken);
+            }
+            await foreach (var cmdEvent in Cli.RunListen("vagrant", [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, stoppingToken: cancellationToken))
+            {
+                switch (cmdEvent)
+                {
+                    case StandardOutputCommandEvent stdOut:
+                        _logger.LogDebug("{x}", stdOut.Text);
+                        break;
+                    case StandardErrorCommandEvent stdErr:
+                        _logger.LogDebug("{x}", stdErr.Text);
+                        break;
+                    case ExitedCommandEvent exited:
+                        var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
+                        if (exited.ExitCode != 0)
+                        {
+                            throw new Exception(msg);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("{x}", msg);
+                        }
+                        break;
+                }
+            }
+        }, cancellationToken);
+
         await locker.Execute(replicaId, async () =>
         {
-            try
+            isLocked = true;
+            var replicaState = await GetStateCore(replicaPath, cancellationToken);
+            while (replicaState != VagrantReplicaState.Running)
             {
-                var ct = cancellationToken.WithTimeout(TimeSpan.FromSeconds(30));
-                await Task.Run(async () =>
-                {
-                    await foreach (var cmdEvent in Cli.RunListen("vagrant", [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, stoppingToken: ct))
-                    {
-                        switch (cmdEvent)
-                        {
-                            case StandardOutputCommandEvent stdOut:
-                                _logger.LogDebug("{x}", stdOut.Text);
-                                break;
-                            case StandardErrorCommandEvent stdErr:
-                                _logger.LogDebug("{x}", stdErr.Text);
-                                break;
-                            case ExitedCommandEvent exited:
-                                var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
-                                if (exited.ExitCode != 0)
-                                {
-                                    throw new Exception(msg);
-                                }
-                                else
-                                {
-                                    _logger.LogDebug("{x}", msg);
-                                }
-                                break;
-                        }
-                    }
-                }, ct);
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception)
-            {
-                throw;
+                await Task.Delay(1000, cancellationToken);
             }
         });
+
+        await executeTask;
     }
 
     public async Task<VagrantReplica?> GetReplica(string id, CancellationToken cancellationToken)
