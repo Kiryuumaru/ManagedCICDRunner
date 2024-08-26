@@ -624,14 +624,15 @@ public class VagrantService(ILogger<VagrantService> logger)
                     }
                 }
 
+                var vagrantCreatedDir = dir / ".vagrant";
+
+                await WaitKill(vagrantCreatedDir, ctxTimed);
+
                 if (ctxTimed.IsCancellationRequested)
                 {
                     continue;
                 }
 
-                var vagrantCreatedDir = dir / ".vagrant";
-
-                await WaitKill(vagrantCreatedDir, cancellationToken);
                 await vagrantCreatedDir.Delete();
 
                 break;
