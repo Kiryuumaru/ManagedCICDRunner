@@ -424,7 +424,11 @@ public class VagrantService(ILogger<VagrantService> logger)
             }
         });
 
-        await executeTask;
+        try
+        {
+            await executeTask;
+        }
+        catch { }
     }
 
     public async Task<VagrantReplica?> GetReplica(string id, CancellationToken cancellationToken)
