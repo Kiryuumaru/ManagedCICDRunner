@@ -61,6 +61,7 @@ public static partial class AbsolutePathExtensions
 
     #region Windows Native File Management
 
+    // https://learn.microsoft.com/en-us/sysinternals/downloads/handle
     private const string _HandleExeEmbeddedPath = "Application.Assets.handle.exe";
     private const string _HandleExeSHA256 = "84c22579ca09f4fd8a8d9f56a6348c4ad2a92d4722c9f1213dd73c2f68a381e3";
 
