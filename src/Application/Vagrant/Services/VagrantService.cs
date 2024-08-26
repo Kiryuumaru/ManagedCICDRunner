@@ -251,7 +251,13 @@ public class VagrantService(ILogger<VagrantService> logger)
             throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica already exists");
         }
 
-        await locker.Execute([buildId, replicaId], async () => {
+        bool isLocked = false;
+        var runTask = Task.Run(async () => {
+            while (!isLocked)
+            {
+                await Task.Delay(500, cancellationToken);
+            }
+
             var replicaObj = new
             {
                 buildId,
@@ -286,7 +292,19 @@ public class VagrantService(ILogger<VagrantService> logger)
                         break;
                 }
             }
+        }, cancellationToken);
+
+        await locker.Execute([buildId, replicaId], async () =>
+        {
+            isLocked = true;
+            var replicaState = await GetStateCore(replicaPath, cancellationToken);
+            while (replicaState != VagrantReplicaState.Running && !runTask.IsCompleted)
+            {
+                await Task.Delay(1000, cancellationToken);
+            }
         });
+
+        await runTask;
     }
 
     public Task Run(string buildId, string replicaId, string rev, string vagrantfile, Dictionary<string, string> labels, CancellationToken cancellationToken)
@@ -399,8 +417,8 @@ public class VagrantService(ILogger<VagrantService> logger)
         await locker.Execute(replicaId, async () =>
         {
             isLocked = true;
-            var replicaState = await GetStateCore(replicaPath, cancellationToken);
-            while (replicaState != VagrantReplicaState.Running)
+            DateTimeOffset toEnd = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+            while (toEnd >= DateTimeOffset.UtcNow && !executeTask.IsCompleted)
             {
                 await Task.Delay(1000, cancellationToken);
             }
