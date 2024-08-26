@@ -579,7 +579,16 @@ public class VagrantService(ILogger<VagrantService> logger)
                 {
                     var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: ctxTimed);
                     var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
-                    foreach (var prop in getVmJson.RootElement.EnumerateArray())
+                    JsonElement[] elements = [];
+                    if (getVmJson.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        elements = [.. getVmJson.RootElement.EnumerateArray()];
+                    }
+                    else
+                    {
+                        elements = [getVmJson.RootElement];
+                    }
+                    foreach (var prop in elements)
                     {
                         var vmName = prop!.GetProperty("Name").GetString()!;
                         if (prop!.GetProperty("Name").GetString()!.StartsWith(id, StringComparison.InvariantCultureIgnoreCase))
@@ -659,7 +668,16 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: cancellationToken);
             var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
-            foreach (var prop in getVmJson.RootElement.EnumerateArray())
+            JsonElement[] elements = [];
+            if (getVmJson.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                elements = [.. getVmJson.RootElement.EnumerateArray()];
+            }
+            else
+            {
+                elements = [getVmJson.RootElement];
+            }
+            foreach (var prop in elements)
             {
                 var vmName = prop!.GetProperty("Name").GetString()!;
                 if (prop!.GetProperty("Name").GetString()!.StartsWith($"{vagrantDir.Name}_default_", StringComparison.InvariantCultureIgnoreCase))
