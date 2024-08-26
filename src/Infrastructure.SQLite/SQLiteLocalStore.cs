@@ -14,7 +14,7 @@ internal class SQLiteLocalStore
 
     private async Task Bootstrap()
     {
-        _dbPath.Parent.CreateDirectory();
+        await _dbPath.Parent.CreateDirectory();
         await _db.CreateTableAsync<SQLiteDataHolder>();
     }
 
