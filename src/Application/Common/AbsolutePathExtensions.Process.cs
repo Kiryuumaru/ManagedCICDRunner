@@ -61,15 +61,18 @@ public static partial class AbsolutePathExtensions
 
     #region Windows Native File Management
 
+    private const string _HandleExeEmbeddedPath = "Application.Assets.handle.exe";
+    private const string _HandleExeSHA256 = "84c22579ca09f4fd8a8d9f56a6348c4ad2a92d4722c9f1213dd73c2f68a381e3";
+
     private static async Task<List<Process>> WhoIsLockingWindows(string path)
     {
         AbsolutePath handlePath = Path.GetTempPath();
         handlePath /= "handle";
         handlePath /= "handle.exe";
 
-        if (!handlePath.FileExists())
+        if (!handlePath.FileExists() || await handlePath.GetHashSHA256() != _HandleExeSHA256)
         {
-            using var stream = Assembly.GetAssembly(typeof(AbsolutePath))!.GetManifestResourceStream("Application.Assets.handle.exe")!;
+            using var stream = Assembly.GetAssembly(typeof(AbsolutePath))!.GetManifestResourceStream(_HandleExeEmbeddedPath)!;
             byte[] bytes = new byte[(int)stream.Length];
             stream.Read(bytes, 0, bytes.Length);
             await handlePath.Parent.CreateDirectory();
