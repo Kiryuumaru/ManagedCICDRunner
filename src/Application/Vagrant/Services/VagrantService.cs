@@ -144,6 +144,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.network "public_network", bridge: "Default Switch"
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
+                    hv.ip_address_timeout = 900
                   end
                   config.vm.provision "shell", inline: <<-SHELL
                     {inputScript}
@@ -346,6 +347,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.network "public_network", bridge: "Default Switch"
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
+                    hv.ip_address_timeout = 900
                     hv.linked_clone = true
                     hv.memory = "{1024 * memoryGB}"
                     hv.cpus = "{cpus}"
