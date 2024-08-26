@@ -26,4 +26,4 @@ Expand-Archive -LiteralPath $appZipPath -DestinationPath $tempPath -Force
 
 Copy-Item -Path "$tempPath\$rootextract\*" -Destination "$root" -Recurse -Force
 
-& $appExecPath --install-service
+#& $appExecPath --install-service
