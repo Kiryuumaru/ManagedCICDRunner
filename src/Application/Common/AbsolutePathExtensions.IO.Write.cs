@@ -220,38 +220,35 @@ public static partial class AbsolutePathExtensions
     /// <returns>A task representing the asynchronous move operation.</returns>
     public static Task<bool> Delete(this AbsolutePath path)
     {
-        return Task.Run(() =>
+        if (path.FileExists())
         {
-            if (path.FileExists())
-            {
-                File.Delete(path);
+            File.Delete(path);
 
-                return true;
-            }
-            else if (path.DirectoryExists())
-            {
-                var fileMap = GetFileMap(path);
+            return Task.FromResult(true);
+        }
+        else if (path.DirectoryExists())
+        {
+            var fileMap = GetFileMap(path);
 
-                foreach (var (Link, Target) in fileMap.SymbolicLinks)
+            foreach (var (Link, Target) in fileMap.SymbolicLinks)
+            {
+                if (Link.DirectoryExists())
                 {
-                    if (Link.DirectoryExists())
-                    {
-                        Directory.Delete(Link);
-                    }
-                    else
-                    {
-                        File.Delete(Link);
-                    }
+                    Directory.Delete(Link);
                 }
-
-                Directory.Delete(path, true);
-
-                return true;
+                else
+                {
+                    File.Delete(Link);
+                }
             }
-            else
-            {
-                return false;
-            }
-        });
+
+            Directory.Delete(path, true);
+
+            return Task.FromResult(true);
+        }
+        else
+        {
+            return Task.FromResult(false);
+        }
     }
 }

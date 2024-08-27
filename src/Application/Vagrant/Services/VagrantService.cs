@@ -22,7 +22,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TransactionHelpers;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+using Application.Vagrant.Models;
 
 namespace Application.Vagrant.Services;
 
@@ -37,7 +37,36 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     private readonly ExecutorLocker locker = new();
 
-    public async Task<VagrantBuild> Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, CancellationToken cancellationToken)
+    public VagrantBuilder GetBuilder()
+    {
+        return new VagrantBuilder(this);
+    }
+
+    public async Task Boot(VagrantBuilder vagrantBuilder, string replicaId, string replicaRev, CancellationToken cancellationToken)
+    {
+        if (vagrantBuilder.RunnerOSType == null)
+        {
+            throw new Exception("runnerOSType is not set");
+        }
+
+        string currentRev = "base";
+        string? currentBuildId = null;
+        foreach (var (buildId, vagrantfileContentFactory) in vagrantBuilder.DependentBuilds)
+        {
+            currentBuildId = buildId;
+            var build = await Build(buildId, currentRev, vagrantfileContentFactory, cancellationToken);
+            currentRev = $"{build.VagrantFileHash}-base_hash";
+        }
+
+        if (currentBuildId == null)
+        {
+            throw new Exception("no base vagrant build configured");
+        }
+
+        await Run(vagrantBuilder.RunnerOSType.Value, currentBuildId, replicaId, replicaRev, vagrantBuilder.Cpus, vagrantBuilder.MemoryGB, [], cancellationToken);
+    }
+
+    private async Task<VagrantBuild> Build(string buildId, string rev, Func<Task<string>> vagrantfileFactory, CancellationToken cancellationToken)
     {
         string? vagrantFileHash = null;
 
@@ -45,6 +74,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath buildFilePath = boxPath / "build.json";
         AbsolutePath packageBoxPath = boxPath / "package.box";
         AbsolutePath vagrantfilePath = boxPath / "Vagrantfile";
+        AbsolutePath vagrantCreatedDir = boxPath / ".vagrant";
         AbsolutePath boxPathTemp = TempPath / $"{buildId}-{Guid.NewGuid()}";
         AbsolutePath vagrantfilePathTemp = boxPathTemp / "Vagrantfile";
 
@@ -60,10 +90,10 @@ public class VagrantService(ILogger<VagrantService> logger)
             currentRev = revProp.GetString()!;
         }
 
-        string vagrantfileContent = await vagrantfileFactory(boxPath);
+        string vagrantfileContent = await vagrantfileFactory();
 
         await vagrantfilePathTemp.WriteAllTextAsync(vagrantfileContent, cancellationToken);
-        vagrantFileHash = GetHash(vagrantfilePathTemp);
+        vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512();
         await WaitKillAll(boxPathTemp, [], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
         VagrantBuild vagrantBuild = new()
@@ -94,6 +124,8 @@ public class VagrantService(ILogger<VagrantService> logger)
 
             await DeleteVMCore(boxPath, buildId, cancellationToken);
 
+            await vagrantCreatedDir.Delete();
+
             var buildObj = new
             {
                 id = buildId,
@@ -104,54 +136,6 @@ public class VagrantService(ILogger<VagrantService> logger)
         });
 
         return vagrantBuild;
-    }
-
-    public Task<VagrantBuild> Build(string buildId, string rev, string vagrantfile, CancellationToken cancellationToken)
-    {
-        return Build(buildId, rev, _ => Task.FromResult(vagrantfile), cancellationToken);
-    }
-
-    public Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, string inputScript, CancellationToken cancellationToken)
-    {
-        return Build(buildId, rev, boxPath =>
-        {
-            string vmGuest;
-            string vmCommunicator;
-            string vagrantSyncFolder;
-            if (runnerOSType == RunnerOSType.Linux)
-            {
-                vmGuest = ":linux";
-                vmCommunicator = "ssh";
-                vagrantSyncFolder = "/vagrant";
-            }
-            else if (runnerOSType == RunnerOSType.Windows)
-            {
-                vmGuest = ":windows";
-                vmCommunicator = "winssh";
-                vagrantSyncFolder = "C:/vagrant";
-            }
-            else
-            {
-                throw new NotSupportedException();
-            }
-            return Task.FromResult($"""
-                Vagrant.configure("2") do |config|
-                  config.vm.box = "{baseBuildId}"
-                  config.vm.guest = {vmGuest}
-                  config.vm.boot_timeout = 1800
-                  config.vm.communicator = "{vmCommunicator}"
-                  config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
-                  config.vm.network "public_network", bridge: "Default Switch"
-                  config.vm.provider "hyperv" do |hv|
-                    hv.enable_virtualization_extensions = true
-                    hv.ip_address_timeout = 900
-                  end
-                  config.vm.provision "shell", inline: <<-SHELL
-                    {inputScript}
-                  SHELL
-                end
-                """);
-        }, cancellationToken);
     }
 
     public async Task<VagrantBuild?> GetBuild(string id, CancellationToken cancellationToken)
@@ -241,7 +225,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         });
     }
 
-    public async Task Run(string buildId, string replicaId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, Dictionary<string, string> labels, CancellationToken cancellationToken)
+    private async Task Run(string buildId, string replicaId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, Dictionary<string, string> labels, CancellationToken cancellationToken)
     {
         AbsolutePath replicaPath = ReplicaPath / replicaId;
         AbsolutePath vagrantfilePath = replicaPath / "Vagrantfile";
@@ -295,13 +279,22 @@ public class VagrantService(ILogger<VagrantService> logger)
             }
         }, cancellationToken);
 
-        await locker.Execute([buildId, replicaId], async () =>
+        await locker.Execute([replicaId], async () =>
         {
             isLocked = true;
-            var replicaState = await GetStateCore(replicaPath, cancellationToken);
-            while (replicaState != VagrantReplicaState.Running && !runTask.IsCompleted)
+            while (true)
             {
-                await Task.Delay(1000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested ||
+                    runTask.IsCompleted ||
+                    await GetStateCore(replicaPath, cancellationToken) == VagrantReplicaState.Running)
+                {
+                    break;
+                }
+                try
+                {
+                    await Task.Delay(1000, cancellationToken);
+                }
+                catch { }
             }
         });
 
@@ -438,6 +431,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath dir = ReplicaPath / id;
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath replicaFilePath = dir / "replica.json";
+        AbsolutePath removedFilePath = dir / "removed";
 
         if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson ||
             !replicaJson.RootElement.TryGetProperty("buildId", out var buildIdProp) ||
@@ -448,6 +442,11 @@ public class VagrantService(ILogger<VagrantService> logger)
             replicaIdProp.ValueKind != JsonValueKind.String ||
             revProp.ValueKind != JsonValueKind.String ||
             labelsProp.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (removedFilePath.FileExists())
         {
             return null;
         }
@@ -495,13 +494,14 @@ public class VagrantService(ILogger<VagrantService> logger)
         return vagrantReplicas.ToDictionary();
     }
 
-    public async Task DeleteReplica(string id, CancellationToken cancellationToken)
+    public Task DeleteReplica(string id, CancellationToken cancellationToken)
     {
         AbsolutePath dir = ReplicaPath / id;
-        AbsolutePath vagrantfilePath = dir / "Vagrantfile";
-        AbsolutePath replicaFilePath = dir / "replica.json";
+        AbsolutePath removedFilePath = dir / "removed";
 
-        await locker.Execute(id, async () =>
+        removedFilePath.TouchFile();
+
+        return locker.Execute(id, async () =>
         {
             await DeleteCore(dir, $"{id}_default_", cancellationToken);
         });
@@ -518,16 +518,22 @@ public class VagrantService(ILogger<VagrantService> logger)
                     break;
                 }
 
-                await DeleteVMCore(dir, id, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                await DeleteVMCore(dir, id, cancellationToken);
 
-                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
-
-                if ((dir / "Vagrantfile").DirectoryExists())
+                if ((dir / "Vagrantfile").FileExists())
                 {
-                    await DeleteVagrant(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                    await DeleteVagrant(dir, cancellationToken);
                 }
 
-                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                try
+                {
+                    await WaitKill(dir, cancellationToken);
+                }
+                catch { }
+
+                await (dir / "Vagrantfile").Delete();
+
+                await (dir / ".vagrant").Delete();
 
                 await dir.Delete();
 
@@ -542,7 +548,9 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task DeleteVagrant(AbsolutePath dir, CancellationToken cancellationToken)
     {
-        await foreach (var cmdEvent in Cli.RunListen("vagrant", ["destroy", "-f"], dir, stoppingToken: cancellationToken))
+        var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromMinutes(2));
+
+        await foreach (var cmdEvent in Cli.RunListen("vagrant", ["destroy", "-f"], dir, stoppingToken: ctxTimed))
         {
             switch (cmdEvent)
             {
@@ -639,16 +647,23 @@ public class VagrantService(ILogger<VagrantService> logger)
                     }
                 }
 
-                var vagrantCreatedDir = dir / ".vagrant";
-
-                await WaitKill(vagrantCreatedDir, ctxTimed);
-
                 if (ctxTimed.IsCancellationRequested)
                 {
                     continue;
                 }
 
-                await vagrantCreatedDir.Delete();
+                var vagrantCreatedDir = dir / ".vagrant";
+
+                try
+                {
+                    await WaitKill(vagrantCreatedDir, ctxTimed);
+                }
+                catch { }
+
+                if (ctxTimed.IsCancellationRequested)
+                {
+                    continue;
+                }
 
                 break;
             }
@@ -703,14 +718,6 @@ public class VagrantService(ILogger<VagrantService> logger)
         return vagrantReplicaState;
     }
 
-    private string GetHash(AbsolutePath filename)
-    {
-        using var sha512 = SHA512.Create();
-        using var stream = File.OpenRead(filename);
-        var hash = sha512.ComputeHash(stream);
-        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-    }
-
     private Task WaitKill(AbsolutePath path, CancellationToken cancellationToken)
     {
         return WaitKillAll(path, ["system", "vmms", "vmwp"], cancellationToken);
@@ -725,7 +732,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 var processes = await path.GetProcesses();
                 if (processes.Length == 0)
                 {
-                    break;
+                    return;
                 }
                 foreach (var process in processes)
                 {
@@ -741,11 +748,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 }
             }
             catch { }
-            try
-            {
-                await Task.Delay(1000, cancellationToken);
-            }
-            catch { }
+            await Task.Delay(500, cancellationToken);
         }
     }
 }

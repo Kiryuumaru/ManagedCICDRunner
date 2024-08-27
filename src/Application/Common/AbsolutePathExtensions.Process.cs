@@ -53,13 +53,17 @@ public static partial class AbsolutePathExtensions
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            return WhoIsLockingLinux(path);
+            return await WhoIsLockingLinux(path);
         }
 
-        throw new NotSupportedException();
+        throw new NotSupportedException(RuntimeInformation.OSDescription);
     }
 
     #region Windows Native File Management
+
+    /// <summary>
+    /// Embarrasing way to check file and folder locks
+    /// </summary>
 
     // https://learn.microsoft.com/en-us/sysinternals/downloads/handle
     private const string _HandleExeEmbeddedPath = "Application.Assets.handle.exe";
@@ -82,8 +86,22 @@ public static partial class AbsolutePathExtensions
 
         List<Process> processes = [];
 
-        var handleResult = await Cli.RunOnce(handlePath, ["-accepteula", "-nobanner", "-v", path]);
-        var handleResultSplit = handleResult.Split('\n');
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = handlePath,
+            Arguments = $"-accepteula -nobanner -v \"{path}\"",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+
+        var handleResult = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        var handleResultSplit = handleResult.Split([Environment.NewLine], StringSplitOptions.RemoveEmptyEntries);
         if (handleResultSplit.Length > 1)
         {
             for (int i = 1; i < handleResultSplit.Length; i++)
@@ -91,7 +109,11 @@ public static partial class AbsolutePathExtensions
                 var line = handleResultSplit[i].Split(',');
                 if (line.Length > 1 && int.TryParse(line[1], out var processId))
                 {
-                    processes.Add(Process.GetProcessById(processId));
+                    try
+                    {
+                        processes.Add(Process.GetProcessById(processId));
+                    }
+                    catch { }
                 }
             }
         }
@@ -103,9 +125,43 @@ public static partial class AbsolutePathExtensions
 
     #region Linux Native File Management
 
-    private static List<Process> WhoIsLockingLinux(string path)
+    /// <summary>
+    /// Not sure if works, not tested
+    /// </summary>
+
+    private static async Task<List<Process>> WhoIsLockingLinux(string path)
     {
-        throw new NotImplementedException();
+        var processes = new List<Process>();
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "lsof",
+            Arguments = $"-t \"{path}\"",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        var lines = output.Split([Environment.NewLine], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            if (int.TryParse(line, out var pid))
+            {
+                try
+                {
+                    processes.Add(Process.GetProcessById(pid));
+                }
+                catch { }
+            }
+        }
+
+        return processes;
     }
 
     #endregion
