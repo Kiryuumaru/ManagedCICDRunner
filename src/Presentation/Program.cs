@@ -42,12 +42,14 @@ return await parserResult
         {
             if (Validate(parserResult, opts))
             {
+                var ct = SetupCli(opts.LogLevel);
+
                 if (opts.AsService)
                 {
                     appBuilder.Configuration["MAKE_LOGS"] = "svc";
                 }
 
-                await appBuilder.Build().Run();
+                await appBuilder.Build().Run(ct);
                 return 0;
             }
             return -1;
@@ -158,6 +160,9 @@ class RunOption : IArgumentValidation
 {
     [Option('s', "as-service", Required = false, HelpText = "Run as service mode.")]
     public bool AsService { get; set; }
+
+    [Option('l', "level", Required = false, HelpText = "Level of logs to show.", Default = LogEventLevel.Information)]
+    public LogEventLevel LogLevel { get; set; }
 
     public void Validate()
     {
