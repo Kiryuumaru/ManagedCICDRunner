@@ -7,7 +7,7 @@ using TransactionHelpers;
 
 namespace Application.LocalStore.Interfaces;
 
-public interface ILocalStore
+public interface ILocalStoreService
 {
     Task<Result<string>> Get(string group, string id, CancellationToken cancellationToken);
 

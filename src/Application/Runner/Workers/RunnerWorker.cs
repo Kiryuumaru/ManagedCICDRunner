@@ -1,4 +1,5 @@
-﻿using Application.Common;
+﻿using AbsolutePathHelpers;
+using Application.Common;
 using Application.LocalStore.Services;
 using Application.Runner.Services;
 using Application.Vagrant.Services;
@@ -50,27 +51,47 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private const string GithubRunnerLinuxSHA256 = "3f6efb7488a183e291fc2c62876e14c9ee732864173734facc85a1bfb1744464";
     private const string GithubRunnerWindowsSHA256 = "1c78c51d20b817fb639e0b0ab564cf0469d083ad543ca3d0d7a2cdad5723f3a7";
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await WaitFeature("Microsoft-Hyper-V-All", stoppingToken);
+        await WaitFeature("HypervisorPlatform", stoppingToken);
+        await WaitFeature("VirtualMachinePlatform", stoppingToken);
+
+        using var scope = _serviceProvider.CreateScope();
+        var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
+
+        await vagrantService.VerifyClient(stoppingToken);
+
         RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine1, ex => _logger.LogError("Runner error: {msg}", ex.Message));
-        return Task.CompletedTask;
     }
 
-    private async Task Routine1(CancellationToken stoppingToken)
+    private async Task WaitFeature(string featureName, CancellationToken stoppingToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
-        var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
-        var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
-        var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
-        var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
-
-        await Task.Delay(1000, stoppingToken);
+        _logger.LogDebug("Verifying feature {featureName} is enabled", featureName);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                string enabledHypervRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsOptionalFeature -FeatureName {featureName} -Online).State"], stoppingToken: stoppingToken);
+                enabledHypervRaw = enabledHypervRaw.Trim();
+                if (enabledHypervRaw.Equals("enabled", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    break;
+                }
+            }
+            catch { }
+            _logger.LogError("{featureName} is not enabled", featureName);
+            await Task.Delay(2000, stoppingToken);
+        }
     }
 
     private async Task Routine(CancellationToken stoppingToken)
     {
+        using var logScope = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["RoutineGuid"] = Guid.NewGuid()
+        });
+
         using var scope = _serviceProvider.CreateScope();
         var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
         var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
@@ -87,10 +108,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             (await localStore.Set("runner_controller_id", runnerControllerId, cancellationToken: stoppingToken)).ThrowIfError();
         }
 
-        var httpClient = new HttpClient();
-        httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        httpClient.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
-
         _logger.LogDebug("Fetching runner token entities from service...");
         var runnerTokenEntityMap = (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow();
 
@@ -105,7 +122,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionMap = [];
         foreach (var runnerToken in runnerTokenEntityMap.Values)
         {
-            var runnerListResult = await Execute<JsonDocument>(httpClient, HttpMethod.Get, runnerToken, "actions/runners", stoppingToken);
+            var runnerListResult = await Execute<JsonDocument>(HttpMethod.Get, runnerToken, "actions/runners", stoppingToken);
             if (runnerListResult.IsError)
             {
                 string name = string.IsNullOrEmpty(runnerToken.GithubOrg) ? "" : $"{runnerToken.GithubOrg}/";
@@ -266,7 +283,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             runnersDeleteTasks.Add(Task.Run(async () =>
                             {
-                                await DeleteRunner(runner, runnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                                await DeleteRunner(runner, runnerTokenEntity, vagrantService, stoppingToken);
                                 runnerRuntime.Runners.Remove(runner.Name);
                                 _logger.LogInformation("Runner purged (token deleted): {name}", runner.Name);
                             }, stoppingToken));
@@ -305,7 +322,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     runnersEntityDeleteTasks.Add(Task.Run(async () =>
                     {
-                        await DeleteRunner(runner, runnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                        await DeleteRunner(runner, runnerTokenEntity, vagrantService, stoppingToken);
                         runnerRuntime.Runners.Remove(runner.Name);
                         _logger.LogInformation("Runner purged (runner deleted): {name}", runner.Name);
                     }, stoppingToken));
@@ -411,7 +428,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             deleteDanglingTasks.Add(Task.Run(async () =>
             {
-                await DeleteRunnerAction(RunnerAction, RunnerTokenEntity, httpClient, stoppingToken);
+                await DeleteRunnerAction(RunnerAction, RunnerTokenEntity, stoppingToken);
                 _logger.LogInformation("Runner action purged (dead action): {name}", RunnerAction.Name);
             }, stoppingToken));
         }
@@ -433,7 +450,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     deleteOutdatedTasks.Add(Task.Run(async () =>
                     {
-                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, stoppingToken);
                         runnerRuntime.Runners.Remove(runner.Name);
                         _logger.LogInformation("Runner purged (outdated): {name}", runner.Name);
                     }, stoppingToken));
@@ -474,7 +491,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     deleteAllExcessTasks.Add(Task.Run(async () =>
                     {
-                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, httpClient, stoppingToken);
+                        await DeleteRunner(runner, runnerRuntime.RunnerTokenEntity, vagrantService, stoppingToken);
                         runnerRuntime.Runners.Remove(runner.Name);
                         _logger.LogInformation("Runner purged (excess): {name}", runner.Name);
                     }, stoppingToken));
@@ -493,9 +510,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                 string[] idSplit = id.Split('-');
                 if (idSplit.Length < 3 ||
-                    idSplit[0] == RunnerIdentifier ||
-                    idSplit[1] == runnerControllerId ||
-                    runnerRuntimeMap.ContainsKey(idSplit[2]))
+                    (idSplit[0] == RunnerIdentifier && idSplit[1] == runnerControllerId && runnerRuntimeMap.ContainsKey(idSplit[2])))
                 {
                     return;
                 }
@@ -553,7 +568,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     string id = $"{RunnerIdentifier}-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
                     string replicaId = $"{id}-{runnerRuntime.RunnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                    string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllTextAsync(stoppingToken);
+                    string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllText(stoppingToken);
                     string baseVagrantBuildId = $"{id}-base";
                     string vagrantBuildId = $"{id}";
                     string runnerId = runnerRuntime.RunnerEntity.Id;
@@ -621,7 +636,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                     async Task<string> runnerInputScriptFactory()
                     {
-                        var tokenResponse = await Execute<Dictionary<string, string>>(httpClient, HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
+                        var tokenResponse = await Execute<Dictionary<string, string>>(HttpMethod.Post, runnerToken, "actions/runners/registration-token", stoppingToken);
                         tokenResponse.ThrowIfErrorOrHasNoValue();
                         string regToken = tokenResponse.Value["token"];
                         string inputArgs = $"--name {replicaId} --url {GetConfigUrl(runnerToken)} --work w --disableupdate --ephemeral --unattended --token {regToken}";
@@ -765,17 +780,24 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         _logger.LogDebug("Runner routine end");
     }
 
-    private static async Task<HttpResult> Execute(HttpClient httpClient, HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
+    private HttpRequestMessage ExecutePrepareMessage(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
     {
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerTokenEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerTokenEntity.GithubToken);
+        return requestMessage;
+    }
+
+    private async Task<HttpResult> Execute(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
+    {
+        using var httpClient = GetGithubHttpClient();
+        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement, cancellationToken);
         return await httpClient.Execute(requestMessage, cancellationToken: cancellationToken);
     }
 
-    private static async Task<HttpResult<T>> Execute<T>(HttpClient httpClient, HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
+    private async Task<HttpResult<T>> Execute<T>(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
     {
-        HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerTokenEntity, segement));
-        requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerTokenEntity.GithubToken);
+        using var httpClient = GetGithubHttpClient();
+        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement, cancellationToken);
         return await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken);
     }
 
@@ -854,21 +876,22 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         return absolutePath;
     }
 
-    private async Task DeleteRunner(RunnerInstance runner, RunnerTokenEntity runnerTokenEntity, VagrantService vagrantService, HttpClient httpClient, CancellationToken cancellationToken)
+    private async Task DeleteRunner(RunnerInstance runner, RunnerTokenEntity runnerTokenEntity, VagrantService vagrantService, CancellationToken cancellationToken)
     {
+        using var httpClient = GetGithubHttpClient();
         List<Task> runnerDeleteTasks = [];
-        runnerDeleteTasks.Add(DeleteRunnerAction(runner.RunnerAction, runnerTokenEntity, httpClient, cancellationToken));
+        runnerDeleteTasks.Add(DeleteRunnerAction(runner.RunnerAction, runnerTokenEntity, cancellationToken));
         runnerDeleteTasks.Add(DeleteRunnerVagrantReplica(runner.VagrantReplica?.Id, vagrantService, cancellationToken));
         await Task.WhenAll(runnerDeleteTasks);
     }
 
-    private async Task DeleteRunnerAction(RunnerAction? runnerAction, RunnerTokenEntity runnerTokenEntity, HttpClient httpClient, CancellationToken cancellationToken)
+    private async Task DeleteRunnerAction(RunnerAction? runnerAction, RunnerTokenEntity runnerTokenEntity, CancellationToken cancellationToken)
     {
         if (runnerAction != null)
         {
             try
             {
-                (await Execute(httpClient, HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runnerAction.Id}", cancellationToken)).ThrowIfError();
+                (await Execute(HttpMethod.Delete, runnerTokenEntity, $"actions/runners/{runnerAction.Id}", cancellationToken)).ThrowIfError();
             }
             catch (Exception ex)
             {
@@ -883,5 +906,12 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             await vagrantService.DeleteReplica(vagrantReplicaId, cancellationToken);
         }
+    }
+
+    private HttpClient GetGithubHttpClient()
+    {
+        var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
+        httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+        return httpClient;
     }
 }

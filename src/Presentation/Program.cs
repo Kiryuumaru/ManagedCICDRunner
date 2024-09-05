@@ -1,157 +1,238 @@
+using AbsolutePathHelpers;
+using Application;
+using Application.Common;
+using Application.Logger.Interfaces;
 using ApplicationBuilderHelpers;
 using CliWrap.EventStream;
+using CommandLine;
+using CommandLine.Text;
+using Infrastructure.Serilog;
 using Infrastructure.SQLite;
+using Infrastructure.SQLite.LocalStore;
+using Microsoft.Extensions.Configuration;
 using Presentation;
+using Presentation.Common;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
-using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using Application.Common;
 
-CancellationTokenSource cts = new();
-Console.CancelKeyPress += (s, e) =>
-{
-    cts.Cancel();
-};
+ApplicationHostBuilder<WebApplicationBuilder> appBuilder = ApplicationHost.FromBuilder(WebApplication.CreateBuilder(args))
+    .Add<Presentation.Presentation>()
+    .Add<SerilogInfrastructure>()
+    .Add<SQLiteLocalStoreInfrastructure>();
 
-if (args.Any(i => i.Equals("--install-service", StringComparison.InvariantCultureIgnoreCase)))
-{
-    await installAsService();
-}
-else if (args.Any(i => i.Equals("--uninstall-service", StringComparison.InvariantCultureIgnoreCase)))
-{
-    await uninstallAsService();
-}
-else if (args.Any(i => i.Equals("--logs-service", StringComparison.InvariantCultureIgnoreCase)))
-{
-    await foreach (var commandEvent in Cli.RunListen("powershell", ["Get-Content", "-Path", "svc.combined.log", "-Wait"], stoppingToken: cts.Token))
+var parserResult = new Parser(with =>
     {
-        switch (commandEvent)
+        with.CaseInsensitiveEnumValues = true;
+        with.CaseSensitive = false;
+        with.IgnoreUnknownArguments = false;
+    })
+    .ParseArguments<RunOption, ServiceOptions, LogsOptions>(args);
+
+return await parserResult
+    .WithNotParsed(_ => DisplayHelp(parserResult))
+    .MapResult(
+        async (RunOption opts) =>
         {
-            case StandardOutputCommandEvent outEvent:
-                Console.WriteLine(outEvent.Text);
-                break;
-            case StandardErrorCommandEvent errEvent:
-                Console.WriteLine(errEvent.Text);
-                break;
-        }
-    }
-}
-else
+            if (Validate(parserResult, opts))
+            {
+                if (opts.AsService)
+                {
+                    appBuilder.Configuration["MAKE_LOGS"] = "svc";
+                }
+
+                await appBuilder.Build().Run();
+                return 0;
+            }
+            return -1;
+        },
+        async (ServiceOptions opts) =>
+        {
+            if (Validate(parserResult, opts))
+            {
+                var ct = SetupCli(opts.LogLevel);
+                try
+                {
+                    if (opts.Install)
+                    {
+                        await ServiceExtension.InstallAsService(ct);
+                    }
+                    else if (opts.Uninstall)
+                    {
+                        await ServiceExtension.UninstallAsService(ct);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                return 0;
+            }
+            return -1;
+        },
+        async (LogsOptions opts) =>
+        {
+            if (Validate(parserResult, opts))
+            {
+                var ct = SetupCli(opts.LogLevel);
+                var host = appBuilder.Build();
+                var loggerReader = host.Host.Services.GetRequiredService<ILoggerReader>();
+                try
+                {
+                    await loggerReader.Start(opts.Tail, opts.Follow, opts.ScopePairs!, ct);
+                }
+                catch (OperationCanceledException) { }
+                return 0;
+            }
+            return -1;
+        },
+        errs => Task.FromResult(-1));
+
+CancellationToken SetupCli(LogEventLevel logEventLevel)
 {
-    ApplicationDependencyBuilder.FromBuilder(WebApplication.CreateBuilder(args))
-        .Add<BasePresentation>()
-        .Add<SQLiteApplication>()
-        .Run();
+    appBuilder.Configuration["LOGGER_LEVEL"] = logEventLevel switch
+    {
+        LogEventLevel.Verbose => LogLevel.Trace.ToString(),
+        LogEventLevel.Debug => LogLevel.Debug.ToString(),
+        LogEventLevel.Information => LogLevel.Information.ToString(),
+        LogEventLevel.Warning => LogLevel.Warning.ToString(),
+        LogEventLevel.Error => LogLevel.Error.ToString(),
+        LogEventLevel.Fatal => LogLevel.Critical.ToString(),
+        _ => throw new NotImplementedException(logEventLevel.ToString())
+    };
+    CancellationTokenSource cts = new();
+    Console.CancelKeyPress += (s, e) =>
+    {
+        cts.Cancel();
+    };
+    return cts.Token;
 }
 
-async Task installAsService()
+void DisplayHelp<T>(ParserResult<T> result)
 {
-    await prepareSvc();
-
-    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
-    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
-
-    try
+    if (result.Errors.IsVersion())
     {
-        await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
-        await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
-    }
-    catch { }
-    await Cli.RunOnce($"{winswExecPath} install {serviceConfig}", stoppingToken: cts.Token);
-    await Cli.RunOnce($"{winswExecPath} start {serviceConfig}", stoppingToken: cts.Token);
-}
-
-async Task uninstallAsService()
-{
-    await prepareSvc();
-
-    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
-    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
-
-    try
-    {
-        await Cli.RunOnce($"{winswExecPath} stop {serviceConfig} --force", stoppingToken: cts.Token);
-    }
-    catch { }
-    await Cli.RunOnce($"{winswExecPath} uninstall {serviceConfig}", stoppingToken: cts.Token);
-}
-
-async Task prepareSvc()
-{
-    await downloadWinsw();
-    var config = """
-        <service>
-          <id>managed-cicd-runner</id>
-          <name>Managed CICD runner</name>
-          <description>This service is a manager for CICD runner</description>
-          <executable>%BASE%\Presentation.exe</executable>
-          <log mode="roll"></log>
-          <startmode>Automatic</startmode>
-          <onfailure action="restart" delay="2 sec"/>
-          <outfilepattern>.output.log</outfilepattern>
-          <errfilepattern>.error.log</errfilepattern>
-          <combinedfilepattern>.combined.log</combinedfilepattern>
-          <env name="ASPNETCORE_URLS" value="http://*:5000" />
-        </service>
-        """;
-    var serviceConfig = Environment.CurrentDirectory.Trim('\\') + "\\svc.xml";
-    File.WriteAllText(serviceConfig, config);
-}
-
-async Task downloadWinsw()
-{
-    var winswExecPath = Environment.CurrentDirectory.Trim('\\') + "\\winsw.exe";
-    if (File.Exists(winswExecPath))
-    {
-        return;
-    }
-    string folderName;
-    if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
-    {
-        folderName = "winsw_windows_x64";
-    }
-    else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
-    {
-        folderName = "winsw_windows_arm64";
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        FileVersionInfo fileVersionInfo = FileVersionInfo.GetVersionInfo(assembly.Location);
+        Console.WriteLine(fileVersionInfo.ProductVersion);
     }
     else
     {
-        throw new NotSupportedException();
+        Console.WriteLine(HelpText.AutoBuild(result, help =>
+        {
+            help.AddEnumValuesToHelpText = true;
+            help.AutoHelp = true;
+            help.AutoVersion = true;
+            help.AddDashesToOption = true;
+
+            help.AddOptions(result);
+
+            return HelpText.DefaultParsingErrorsHandler(result, help);
+
+        }, e => e));
     }
-    string dlUrl = $"https://github.com/Kiryuumaru/winsw-modded/releases/download/build.1/{folderName}.zip";
-    var downloadsPath = Environment.CurrentDirectory.Trim('\\') + "\\downloads";
-    var winswZipPath = downloadsPath + "\\winsw.zip";
-    var winswZipExtractPath = downloadsPath + "\\winsw";
-    var winswDownloadedExecPath = winswZipExtractPath + $"\\{folderName}\\winsw.exe";
+}
+
+bool Validate<T>(ParserResult<T> parserResult, IArgumentValidation argsToValidate)
+{
     try
     {
-        Directory.Delete(winswZipPath, true);
+        argsToValidate.Validate();
+        return true;
     }
-    catch { }
-    try
+    catch (ArgumentValidationException ex)
     {
-        Directory.Delete(winswZipExtractPath, true);
+        Console.WriteLine();
+        Console.WriteLine("Invalid arguments detected: {0}", ex.Message);
+        Console.WriteLine();
+        DisplayHelp(parserResult);
+        return false;
     }
-    catch { }
-    try
+}
+
+[Verb("run", HelpText = "Run application")]
+class RunOption : IArgumentValidation
+{
+    [Option('s', "as-service", Required = false, HelpText = "Run as service mode.")]
+    public bool AsService { get; set; }
+
+    public void Validate()
     {
-        File.Delete(winswZipPath);
     }
-    catch { }
-    try
+}
+
+[Verb("service", HelpText = "Service manager")]
+class ServiceOptions : IArgumentValidation
+{
+    [Option("install", Required = false, HelpText = "Install service.")]
+    public bool Install { get; set; }
+
+    [Option("uninstall", Required = false, HelpText = "Uninstall service.")]
+    public bool Uninstall { get; set; }
+
+    [Option('l', "level", Required = false, HelpText = "Level of logs to show.", Default = LogEventLevel.Information)]
+    public LogEventLevel LogLevel { get; set; }
+
+    public void Validate()
     {
-        File.Delete(winswZipExtractPath);
+        if (!Install && !Uninstall)
+        {
+            throw new ArgumentValidationException($"No operation selected");
+        }
     }
-    catch { }
-    Directory.CreateDirectory(downloadsPath);
-    Directory.CreateDirectory(winswZipExtractPath);
+}
+
+[Verb("logs", HelpText = "Get logs.")]
+class LogsOptions : IArgumentValidation
+{
+    [Option('t', "tail", Required = false, HelpText = "Log lines print.", Default = 10)]
+    public int Tail { get; set; }
+
+    [Option('f', "follow", Required = false, HelpText = "Follows logs.")]
+    public bool Follow { get; set; }
+
+    [Option('l', "level", Required = false, HelpText = "Level of logs to show.", Default = LogEventLevel.Information)]
+    public LogEventLevel LogLevel { get; set; }
+
+    [Option('s', "scope", Required = false, HelpText = "Scope of logs.")]
+    public IEnumerable<string>? Scope { get; set; }
+
+    public Dictionary<string, string>? ScopePairs { get; set; }
+
+    public void Validate()
     {
-        using var client = new HttpClient();
-        using var s = await client.GetStreamAsync(dlUrl, cancellationToken: cts.Token);
-        using var fs = new FileStream(winswZipPath, FileMode.OpenOrCreate);
-        await s.CopyToAsync(fs, cancellationToken: cts.Token);
+        Dictionary<string, string> scopePairs = [];
+        if (Scope != null)
+        {
+            foreach (var s in Scope)
+            {
+                try
+                {
+                    var pair = s.Split('=');
+                    if (pair.Length != 2)
+                    {
+                        throw new Exception();
+                    }
+                    scopePairs[pair[0]] = pair[1];
+                }
+                catch
+                {
+                    throw new ArgumentValidationException($"Invalid scope value {s}");
+                }
+            }
+        }
+        ScopePairs = scopePairs;
     }
-    ZipFile.ExtractToDirectory(winswZipPath, winswZipExtractPath);
-    File.Copy(winswDownloadedExecPath, winswExecPath);
+}
+
+class ArgumentValidationException(string message) : Exception(message)
+{
+}
+
+interface IArgumentValidation
+{
+    void Validate();
 }

@@ -1,30 +1,47 @@
-﻿using Application;
+﻿using AbsolutePathHelpers;
+using Application;
 using Application.Common;
+using Infrastructure.SQLite.LocalStore.Models;
+using Infrastructure.SQLite.Services;
 using Microsoft.Extensions.DependencyInjection;
 using SQLite;
 using SQLitePCL;
 using TransactionHelpers;
 
-namespace Infrastructure.SQLite;
+namespace Infrastructure.SQLite.LocalStore.Services;
 
-internal class SQLiteLocalStore
+internal class SQLiteLocalStoreGlobalService(SQLiteGlobalService sqliteGlobalService)
 {
-    private static readonly AbsolutePath _dbPath = Defaults.DataPath / ".db";
-    private readonly SQLiteAsyncConnection _db = new(_dbPath);
+    private readonly SQLiteGlobalService _sqliteGlobalService = sqliteGlobalService;
 
-    private async Task Bootstrap()
+    private readonly SemaphoreSlim _locker = new(1);
+
+    private SQLiteAsyncConnection? _db = null;
+
+    private async ValueTask<SQLiteAsyncConnection> Bootstrap()
     {
-        await _dbPath.Parent.CreateDirectory();
-        await _db.CreateTableAsync<SQLiteDataHolder>();
+        if (_db == null)
+        {
+            try
+            {
+                await _locker.WaitAsync();
+                _db ??= await _sqliteGlobalService.BootstrapTable<SQLiteDataHolder>();
+            }
+            finally
+            {
+                _locker.Release();
+            }
+        }
+        return _db;
     }
 
     public async Task<string?> Get(string id, string group)
     {
-        await Bootstrap();
+        var db = await Bootstrap();
 
         string rawId = id + "__" + group;
 
-        var getItems = await _db.Table<SQLiteDataHolder>()
+        var getItems = await db.Table<SQLiteDataHolder>()
             .Where(i => i.Group == group)
             .Where(i => i.Id == rawId)
             .ToListAsync();
@@ -34,10 +51,10 @@ internal class SQLiteLocalStore
 
     public async Task<string[]> GetIds(string group)
     {
-        await Bootstrap();
+        var db = await Bootstrap();
 
         var query = "select \"" + nameof(SQLiteDataHolder.Id) + "\" from \"" + nameof(SQLiteDataHolder) + "\" where \"Group\" = \"" + group + "\"";
-        var idHolders = await _db.QueryAsync<SQLiteDataIdHolder>(query);
+        var idHolders = await db.QueryAsync<SQLiteDataIdHolder>(query);
 
         var idPostfix = "__" + group;
 
@@ -50,13 +67,13 @@ internal class SQLiteLocalStore
 
     public async Task Set(string id, string group, string? data)
     {
-        await Bootstrap();
+        var db = await Bootstrap();
 
         string rawId = id + "__" + group;
 
         if (data == null)
         {
-            await _db.Table<SQLiteDataHolder>()
+            await db.Table<SQLiteDataHolder>()
                 .Where(i => i.Group == group)
                 .Where(i => i.Id == rawId)
                 .DeleteAsync();
@@ -69,7 +86,7 @@ internal class SQLiteLocalStore
                 Group = group,
                 Data = data,
             };
-            await _db.InsertOrReplaceAsync(stock);
+            await db.InsertOrReplaceAsync(stock);
         }
     }
 }

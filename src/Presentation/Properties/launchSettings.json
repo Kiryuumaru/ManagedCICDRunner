@@ -1,24 +1,34 @@
 {
   "profiles": {
-    "http": {
+    "logs": {
       "commandName": "Project",
-      "launchBrowser": true,
-      "launchUrl": "swagger",
+      "commandLineArgs": "logs -t 1000 -l Verbose -f -s \"VagrantAction=Build\"",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "dotnetRunMessages": true,
-      "applicationUrl": "http://localhost:5272"
+      "dotnetRunMessages": true
+    },
+    "http": {
+      "commandName": "Project",
+      "commandLineArgs": "run -s",
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://*:23456"
+      },
+      "dotnetRunMessages": true
     },
     "https": {
       "commandName": "Project",
+      "commandLineArgs": "run -s",
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "https://*:23456;http://*:23457"
       },
-      "dotnetRunMessages": true,
-      "applicationUrl": "https://localhost:7207;http://localhost:5272"
+      "dotnetRunMessages": true
     },
     "IIS Express": {
       "commandName": "IISExpress",

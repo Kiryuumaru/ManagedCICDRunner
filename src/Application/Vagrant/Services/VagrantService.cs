@@ -1,4 +1,6 @@
-﻿using Application.Common;
+﻿using AbsolutePathHelpers;
+using Application.Common;
+using Application.Configuration.Extensions;
 using Application.Runner.Services;
 using CliWrap.EventStream;
 using Domain.Runner.Entities;
@@ -6,6 +8,8 @@ using Domain.Runner.Enums;
 using Domain.Runner.Models;
 using Domain.Vagrant.Enums;
 using Domain.Vagrant.Models;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
@@ -22,20 +26,103 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TransactionHelpers;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Application.Vagrant.Services;
 
-public class VagrantService(ILogger<VagrantService> logger)
+public class VagrantService(ILogger<VagrantService> logger, IServiceProvider serviceProvider, IConfiguration configuration)
 {
     private readonly ILogger<VagrantService> _logger = logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IConfiguration _configuration = configuration;
 
-    private static readonly AbsolutePath DataPath = Defaults.DataPath / "vagrant";
-    private static readonly AbsolutePath BuildPath = DataPath / "build";
-    private static readonly AbsolutePath ReplicaPath = DataPath / "replica";
-    private static readonly AbsolutePath TempPath = DataPath / "temp";
+    private readonly Uri _clientInstallerUri = new("https://releases.hashicorp.com/vagrant/2.4.1/vagrant_2.4.1_windows_amd64.msi");
+    private readonly string _clientInstallerHash = "3dbd0f5a063e61e96560bc62f90f4071e1c6f4a2d39020cd162055fcf390a6d4d1b3b551a19224ba9f09ada17ef64cf0989ec2ddfb02bc32c67c7075272d2acf";
+
+    private AbsolutePath DataPath => _configuration.GetDataPath() / "vagrant";
+
+    private AbsolutePath BuildPath => DataPath / "build";
+
+    private AbsolutePath ReplicaPath => DataPath / "replica";
+
+    private AbsolutePath TempPath => DataPath / "temp";
+
+    private AbsolutePath ClientPath => DataPath / "client";
+
+    private AbsolutePath ClientExecPath => ClientPath / "Vagrant" / "bin" / "vagrant.exe";
+
+    private AbsolutePath VagrantHomePath => DataPath / "data";
+
+    private Dictionary<string, string?> VagrantEnvVars => new() { ["VAGRANT_HOME"] = VagrantHomePath };
 
     private readonly ExecutorLocker locker = new();
+
+    public async Task VerifyClient(CancellationToken cancellationToken)
+    {
+        using var _ = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["VagrantAction"] = nameof(VerifyClient)
+        });
+
+        await BuildPath.KillExceptHyperv(cancellationToken);
+        await ReplicaPath.KillExceptHyperv(cancellationToken);
+        await TempPath.KillExceptHyperv(cancellationToken);
+        await VagrantHomePath.KillExceptHyperv(cancellationToken);
+
+        await TempPath.Delete(cancellationToken);
+
+        if (!ClientExecPath.FileExists())
+        {
+            using var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
+
+            var clientInstallerDownloadPath = TempPath / "vagrant_2.4.1_windows_amd64.msi";
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    _logger.LogInformation("Downloading vagrant client installer...");
+
+                    await ClientPath.Delete(cancellationToken);
+                    await clientInstallerDownloadPath.Delete(cancellationToken);
+
+                    ClientPath.CreateDirectory();
+                    clientInstallerDownloadPath.Parent.CreateDirectory();
+
+                    {
+                        using var response = await httpClient.GetAsync(_clientInstallerUri, cancellationToken);
+                        using var fileStream = new FileStream(clientInstallerDownloadPath, FileMode.CreateNew);
+                        await response.Content.CopyToAsync(fileStream, cancellationToken);
+                    }
+
+                    if (await clientInstallerDownloadPath.GetHashSHA512(cancellationToken) != _clientInstallerHash)
+                    {
+                        throw new Exception("Downloaded vagrant file is corrupted");
+                    }
+
+                    _logger.LogInformation("Downloading vagrant client installer done");
+
+                    _logger.LogInformation("Installing vagrant client...");
+
+                    await Cli.RunOnce("powershell", ["-c", $"Start-Process msiexec.exe -Wait -ArgumentList /a,\\\"{clientInstallerDownloadPath}\\\",/qn,TARGETDIR=\\\"{ClientPath}\\\""], TempPath, stoppingToken: cancellationToken);
+
+                    if (!ClientExecPath.FileExists())
+                    {
+                        throw new Exception("Vagrant client was not installed");
+                    }
+
+                    _logger.LogInformation("Installing vagrant client done");
+
+                    break;
+                }
+                catch (Exception ex)
+                {
+                   _logger.LogError("Error installing vagrant client: {err}", ex.Message);
+
+                    await Task.Delay(1000, cancellationToken);
+                }
+            }
+        }
+    }
 
     public async Task<VagrantBuild> Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, CancellationToken cancellationToken)
     {
@@ -50,7 +137,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         string? currentVagrantFileHash = null;
         string? currentRev = null;
-        if (buildFilePath.FileExists() && await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
+        if (buildFilePath.FileExists() && await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
             buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
             buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
             vagrantFileHashProp.ValueKind == JsonValueKind.String &&
@@ -62,9 +149,9 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         string vagrantfileContent = await vagrantfileFactory(boxPath);
 
-        await vagrantfilePathTemp.WriteAllTextAsync(vagrantfileContent, cancellationToken);
-        vagrantFileHash = GetHash(vagrantfilePathTemp);
-        await WaitKillAll(boxPathTemp, [], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+        await vagrantfilePathTemp.WriteAllText(vagrantfileContent, cancellationToken);
+        vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512(cancellationToken);
+        await boxPathTemp.WaitKillAll([], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
         VagrantBuild vagrantBuild = new()
         {
@@ -85,12 +172,20 @@ public class VagrantService(ILogger<VagrantService> logger)
                 await DeleteCore(boxPath, buildId, cancellationToken);
             }
 
-            await vagrantfilePath.WriteAllTextAsync(vagrantfileContent, cancellationToken);
+            await vagrantfilePath.WriteAllText(vagrantfileContent, cancellationToken);
 
-            await Cli.RunListenAndLog(_logger, "vagrant", ["up", "--provider", "hyperv"], boxPath, stoppingToken: cancellationToken);
-            await Cli.RunListenAndLog(_logger, "vagrant", ["reload"], boxPath, stoppingToken: cancellationToken);
-            await Cli.RunListenAndLog(_logger, "vagrant", ["package", "--output", packageBoxPath], boxPath, stoppingToken: cancellationToken);
-            await Cli.RunListenAndLog(_logger, "vagrant", ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["VagrantAction"] = nameof(Build),
+                ["VagrantBuildId"] = buildId,
+                ["VagrantBuildRev"] = rev,
+                ["VagrantFileHash"] = vagrantFileHash
+            });
+
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["reload"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["package", "--output", packageBoxPath], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
             await DeleteVMCore(boxPath, buildId, cancellationToken);
 
@@ -100,7 +195,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 vagrantFileHash,
                 rev
             };
-            await buildFilePath.WriteObjAsync(buildObj, cancellationToken: cancellationToken);
+            await buildFilePath.Write(buildObj, cancellationToken: cancellationToken);
         });
 
         return vagrantBuild;
@@ -142,6 +237,9 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
+                  config.ssh.username = 'vagrant'
+                  config.ssh.password = 'vagrant'
+                  config.ssh.insert_key = 'true'
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.ip_address_timeout = 900
@@ -161,7 +259,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath buildFilePath = dir / "build.json";
 
-        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson ||
+        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson ||
             !buildJson.RootElement.TryGetProperty("id", out var idProp) ||
             !buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) ||
             !buildJson.RootElement.TryGetProperty("rev", out var revProp) ||
@@ -219,7 +317,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         try
         {
-            if (await buildFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson)
+            if (await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson)
             {
                 buildId = buildJson.RootElement.GetProperty("id").GetString()!;
             }
@@ -228,6 +326,12 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await locker.Execute(buildId, async () =>
         {
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["VagrantAction"] = nameof(DeleteBuild),
+                ["VagrantBuildId"] = buildId
+            });
+
             try
             {
                 await DeleteCore(boxPath, $"{id}_default_", cancellationToken);
@@ -235,7 +339,7 @@ public class VagrantService(ILogger<VagrantService> logger)
             catch { }
             try
             {
-                await Cli.RunOnce("vagrant", ["box", "remove", buildId, "-f"], boxPath, stoppingToken: cancellationToken);
+                await Cli.RunOnce(ClientExecPath, ["box", "remove", buildId, "-f"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
             }
             catch { }
         });
@@ -254,6 +358,15 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         bool isLocked = false;
         var runTask = Task.Run(async () => {
+
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["VagrantAction"] = nameof(Run),
+                ["VagrantBuildId"] = buildId,
+                ["VagrantReplicaId"] = replicaId,
+                ["VagrantReplicaRev"] = rev,
+            });
+
             while (!isLocked)
             {
                 await Task.Delay(500, cancellationToken);
@@ -267,10 +380,10 @@ public class VagrantService(ILogger<VagrantService> logger)
                 labels
             };
 
-            await replicaFilePath.WriteObjAsync(replicaObj, cancellationToken: cancellationToken);
-            await vagrantfilePath.WriteAllTextAsync(await vagrantfileFactory(replicaPath), cancellationToken: cancellationToken);
+            await replicaFilePath.Write(replicaObj, cancellationToken: cancellationToken);
+            await vagrantfilePath.WriteAllText(await vagrantfileFactory(replicaPath), cancellationToken: cancellationToken);
 
-            await foreach (var cmdEvent in Cli.RunListen("vagrant", ["up", "--provider", "hyperv"], replicaPath, stoppingToken: cancellationToken))
+            await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, ["up", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken))
             {
                 switch (cmdEvent)
                 {
@@ -345,6 +458,9 @@ public class VagrantService(ILogger<VagrantService> logger)
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
+                  config.ssh.username = 'vagrant'
+                  config.ssh.password = 'vagrant'
+                  config.ssh.insert_key = 'true'
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.ip_address_timeout = 900
@@ -387,33 +503,48 @@ public class VagrantService(ILogger<VagrantService> logger)
         bool isLocked = false;
         var executeTask = Task.Run(async () =>
         {
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["VagrantAction"] = nameof(Execute),
+                ["VagrantReplicaId"] = replicaId
+            });
+
             while (!isLocked)
             {
                 await Task.Delay(500, cancellationToken);
             }
-            await foreach (var cmdEvent in Cli.RunListen("vagrant", [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, stoppingToken: cancellationToken))
+            try
             {
-                switch (cmdEvent)
+                await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken))
                 {
-                    case StandardOutputCommandEvent stdOut:
-                        _logger.LogDebug("{x}", stdOut.Text);
-                        break;
-                    case StandardErrorCommandEvent stdErr:
-                        _logger.LogDebug("{x}", stdErr.Text);
-                        break;
-                    case ExitedCommandEvent exited:
-                        var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
-                        if (exited.ExitCode != 0)
-                        {
-                            throw new Exception(msg);
-                        }
-                        else
-                        {
-                            _logger.LogDebug("{x}", msg);
-                        }
-                        break;
+                    switch (cmdEvent)
+                    {
+                        case StandardOutputCommandEvent stdOut:
+                            _logger.LogDebug("{x}", stdOut.Text);
+                            break;
+                        case StandardErrorCommandEvent stdErr:
+                            _logger.LogDebug("{x}", stdErr.Text);
+                            break;
+                        case ExitedCommandEvent exited:
+                            var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
+                            if (exited.ExitCode != 0)
+                            {
+                                throw new Exception(msg);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("{x}", msg);
+                            }
+                            break;
+                    }
                 }
+                int ss = 1;
             }
+            catch (Exception ex)
+            {
+
+            }
+            int sss = 1;
         }, cancellationToken);
 
         await locker.Execute(replicaId, async () =>
@@ -430,7 +561,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         {
             await executeTask;
         }
-        catch { }
+        catch (OperationCanceledException) { }
     }
 
     public async Task<VagrantReplica?> GetReplica(string id, CancellationToken cancellationToken)
@@ -439,7 +570,7 @@ public class VagrantService(ILogger<VagrantService> logger)
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath replicaFilePath = dir / "replica.json";
 
-        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.ReadObjAsync<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson ||
+        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson ||
             !replicaJson.RootElement.TryGetProperty("buildId", out var buildIdProp) ||
             !replicaJson.RootElement.TryGetProperty("replicaId", out var replicaIdProp) ||
             !replicaJson.RootElement.TryGetProperty("rev", out var revProp) ||
@@ -503,6 +634,12 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         await locker.Execute(id, async () =>
         {
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["VagrantAction"] = nameof(DeleteReplica),
+                ["VagrantReplicaId"] = id
+            });
+
             await DeleteCore(dir, $"{id}_default_", cancellationToken);
         });
     }
@@ -520,16 +657,16 @@ public class VagrantService(ILogger<VagrantService> logger)
 
                 await DeleteVMCore(dir, id, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
-                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                await dir.WaitKillExceptHyperv(cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
                 if ((dir / "Vagrantfile").DirectoryExists())
                 {
                     await DeleteVagrant(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
                 }
 
-                await WaitKill(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                await dir.WaitKillExceptHyperv(cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
-                await dir.Delete();
+                await dir.Delete(cancellationToken);
 
                 break;
             }
@@ -542,7 +679,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
     public async Task DeleteVagrant(AbsolutePath dir, CancellationToken cancellationToken)
     {
-        await foreach (var cmdEvent in Cli.RunListen("vagrant", ["destroy", "-f"], dir, stoppingToken: cancellationToken))
+        await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, ["destroy", "-f"], dir, VagrantEnvVars, stoppingToken: cancellationToken))
         {
             switch (cmdEvent)
             {
@@ -577,7 +714,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 string? vmId = null;
                 try
                 {
-                    var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: ctxTimed);
+                    var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
                     var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
                     JsonElement[] elements = [];
                     if (getVmJson.RootElement.ValueKind == JsonValueKind.Array)
@@ -603,14 +740,14 @@ public class VagrantService(ILogger<VagrantService> logger)
                 {
                     try
                     {
-                        await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-TurnOff", "-Force"], stoppingToken: ctxTimed);
+                        await Cli.RunOnce("powershell", ["Stop-VM", "-Name", vmId, "-TurnOff", "-Force"], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
                     }
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
                         try
                         {
-                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmId}\").State"], stoppingToken: ctxTimed);
+                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmId}\").State"], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
                             if (result.Trim().Equals("off", StringComparison.InvariantCultureIgnoreCase))
                             {
                                 break;
@@ -623,14 +760,14 @@ public class VagrantService(ILogger<VagrantService> logger)
                     }
                     try
                     {
-                        await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], stoppingToken: ctxTimed);
+                        await Cli.RunOnce("powershell", ["Remove-VM", "-Name", vmId, "-Force"], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
                     }
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
                         try
                         {
-                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmId], stoppingToken: ctxTimed);
+                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmId], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
                         }
                         catch
                         {
@@ -641,14 +778,14 @@ public class VagrantService(ILogger<VagrantService> logger)
 
                 var vagrantCreatedDir = dir / ".vagrant";
 
-                await WaitKill(vagrantCreatedDir, ctxTimed);
+                await vagrantCreatedDir.WaitKillExceptHyperv(ctxTimed);
 
                 if (ctxTimed.IsCancellationRequested)
                 {
                     continue;
                 }
 
-                await vagrantCreatedDir.Delete();
+                await vagrantCreatedDir.Delete(cancellationToken);
 
                 break;
             }
@@ -666,7 +803,7 @@ public class VagrantService(ILogger<VagrantService> logger)
 
         try
         {
-            var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], stoppingToken: cancellationToken);
+            var rawGetVm = await Cli.RunOnce("powershell", ["Get-VM | ConvertTo-Json"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
             var getVmJson = JsonSerializer.Deserialize<JsonDocument>(rawGetVm)!;
             JsonElement[] elements = [];
             if (getVmJson.RootElement.ValueKind == JsonValueKind.Array)
@@ -682,7 +819,7 @@ public class VagrantService(ILogger<VagrantService> logger)
                 var vmName = prop!.GetProperty("Name").GetString()!;
                 if (prop!.GetProperty("Name").GetString()!.StartsWith($"{vagrantDir.Name}_default_", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], stoppingToken: cancellationToken)).Trim();
+                    var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken)).Trim();
                     vagrantReplicaState = vmState.ToLowerInvariant() switch
                     {
                         "off" => VagrantReplicaState.Off,
@@ -701,51 +838,5 @@ public class VagrantService(ILogger<VagrantService> logger)
         catch { }
 
         return vagrantReplicaState;
-    }
-
-    private string GetHash(AbsolutePath filename)
-    {
-        using var sha512 = SHA512.Create();
-        using var stream = File.OpenRead(filename);
-        var hash = sha512.ComputeHash(stream);
-        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-    }
-
-    private Task WaitKill(AbsolutePath path, CancellationToken cancellationToken)
-    {
-        return WaitKillAll(path, ["system", "vmms", "vmwp"], cancellationToken);
-    }
-
-    private async Task WaitKillAll(AbsolutePath path, string[] procExceptions, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                var processes = await path.GetProcesses();
-                if (processes.Length == 0)
-                {
-                    break;
-                }
-                foreach (var process in processes)
-                {
-                    try
-                    {
-                        var procName = process.ProcessName;
-                        if (!procExceptions.Any(i => i.Equals(procName, StringComparison.InvariantCultureIgnoreCase)))
-                        {
-                            process.Kill();
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-            try
-            {
-                await Task.Delay(1000, cancellationToken);
-            }
-            catch { }
-        }
     }
 }

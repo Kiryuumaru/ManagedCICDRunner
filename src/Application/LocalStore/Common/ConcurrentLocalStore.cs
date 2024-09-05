@@ -20,7 +20,7 @@ public partial class ConcurrentLocalStore : LocalStoreImpl
 {
     private readonly IDisposable _concurrency;
 
-    internal ConcurrentLocalStore(ILocalStore localStore, IServiceProvider serviceProvider, IDisposable concurrency)
+    internal ConcurrentLocalStore(ILocalStoreService localStore, IServiceProvider serviceProvider, IDisposable concurrency)
         : base(localStore, serviceProvider)
     {
         _concurrency = concurrency;

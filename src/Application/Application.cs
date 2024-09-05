@@ -9,11 +9,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Application;
 
-public class BaseApplication : ApplicationDependency
+public class Application : ApplicationDependency
 {
-    public override void AddServices(ApplicationDependencyBuilder builder, IServiceCollection services)
+    public override void AddServices(ApplicationHostBuilder applicationBuilder, IServiceCollection services)
     {
-        base.AddServices(builder, services);
+        base.AddServices(applicationBuilder, services);
 
         services.AddTransient<LocalStoreService>();
         services.AddSingleton<LocalStoreConcurrencyService>();

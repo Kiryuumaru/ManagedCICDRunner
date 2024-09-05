@@ -123,7 +123,7 @@ class Build : BaseNukeBuildHelpers
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
 
-                    (RootDirectory / "src" / "Presentation" / "Vagrantfiles").CopyRecursively(outPath / "Vagrantfiles");
+                    (RootDirectory / "src" / "Presentation" / "Vagrantfiles").CopyTo(outPath / "Vagrantfiles");
 
                     if (os == "linux")
                     {

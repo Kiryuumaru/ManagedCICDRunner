@@ -9,13 +9,22 @@
 		<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 	</PropertyGroup>
 
+	<PropertyGroup>
+		<Copyright>Copyright (C) 2024 Kiryuumaru</Copyright>
+		<Company>Kiryuumaru</Company>
+		<Version>1.2.3-beta</Version>
+		<AssemblyTitle>Managed CICD Self Runner API</AssemblyTitle>
+	</PropertyGroup>
+
 	<ItemGroup>
+		<PackageReference Include="CommandLineParser" Version="2.9.1" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\Application\Application.csproj" />
-		<ProjectReference Include="..\Infrastructure.SQLite\Infrastructure.SQLite.csproj" />
+		<ProjectReference Include="..\Infrastructure.Serilog\Infrastructure.Serilog.csproj" />
+		<ProjectReference Include="..\Infrastructure.SQLite.LocalStore\Infrastructure.SQLite.LocalStore.csproj" />
 	</ItemGroup>
 
 </Project>

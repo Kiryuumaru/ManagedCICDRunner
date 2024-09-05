@@ -12,9 +12,9 @@ using TransactionHelpers.Exceptions;
 
 namespace Application.LocalStore.Services;
 
-public abstract class LocalStoreImpl(ILocalStore localStore, IServiceProvider serviceProvider)
+public abstract class LocalStoreImpl(ILocalStoreService localStore, IServiceProvider serviceProvider)
 {
-    protected readonly ILocalStore LocalStore = localStore;
+    protected readonly ILocalStoreService LocalStore = localStore;
     protected readonly IServiceProvider ServiceProvider = serviceProvider;
 
     public string CommonGroup { get; set; } = "common_store";
