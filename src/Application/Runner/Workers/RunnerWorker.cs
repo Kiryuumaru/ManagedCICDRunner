@@ -89,6 +89,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     {
         using var logScope = _logger.BeginScope(new Dictionary<string, object>
         {
+            ["Service"] = nameof(RunnerWorker),
             ["RoutineGuid"] = Guid.NewGuid()
         });
 

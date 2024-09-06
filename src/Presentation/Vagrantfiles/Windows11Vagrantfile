@@ -5,6 +5,7 @@ Vagrant.configure("2") do |config|
   config.vm.communicator = "winssh"
   config.vm.synced_folder ".", "C:\\vagrant", disabled: true
   config.vm.network "public_network", bridge: "Default Switch"
+  config.ssh.insert_key = true
   config.vm.provider "hyperv" do |hv|
     hv.enable_virtualization_extensions = true
     hv.ip_address_timeout = 900

@@ -60,6 +60,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
     {
         using var _ = _logger.BeginScope(new Dictionary<string, object>
         {
+            ["Service"] = nameof(VagrantService),
             ["VagrantAction"] = nameof(VerifyClient)
         });
 
@@ -176,6 +177,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
+                ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Build),
                 ["VagrantBuildId"] = buildId,
                 ["VagrantBuildRev"] = rev,
@@ -237,8 +239,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.username = 'vagrant'
-                  config.ssh.password = 'vagrant'
                   config.ssh.insert_key = 'true'
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
@@ -328,6 +328,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         {
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
+                ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(DeleteBuild),
                 ["VagrantBuildId"] = buildId
             });
@@ -361,6 +362,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
+                ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Run),
                 ["VagrantBuildId"] = buildId,
                 ["VagrantReplicaId"] = replicaId,
@@ -458,8 +460,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.username = 'vagrant'
-                  config.ssh.password = 'vagrant'
                   config.ssh.insert_key = 'true'
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
@@ -505,6 +505,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         {
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
+                ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Execute),
                 ["VagrantReplicaId"] = replicaId
             });
@@ -636,6 +637,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         {
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
+                ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(DeleteReplica),
                 ["VagrantReplicaId"] = id
             });

@@ -24,7 +24,15 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
     {
         CancellationTokenSource? logFileCts = null;
         Guid lastLog = Guid.Empty;
-        bool printLogEvent(LogEvent logEvent)
+        bool withinScope(LogEvent logEvent)
+        {
+            return scope.Count == 0 ||
+                scope.All(i =>
+                    logEvent.Properties.TryGetValue(i.Key, out var scopeProp) &&
+                    scopeProp is ScalarValue scopeScalar &&
+                    scopeScalar.Value?.ToString() == i.Value);
+        }
+        bool printLogEvent(LogEvent logEvent, bool skipScopeCheck)
         {
             if (logEvent.Properties.TryGetValue("IsHeadLog", out var isHeadLogProp) &&
                 isHeadLogProp is ScalarValue isHeadLogScalar &&
@@ -39,12 +47,8 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                 Log.Write(FromLogEvent(logEvent, " Runtime ID: {runtimeGuid}", ("runtimeGuid", runtimeGuid)));
                 Log.Write(FromLogEvent(logEvent, "===================================================="));
             }
-            if (scope.Count == 0 ||
-                scope.All(i =>
-                    logEvent.Properties.TryGetValue(i.Key, out var scopeProp) &&
-                    scopeProp is ScalarValue scopeScalar &&
-                    scopeScalar.Value?.ToString() == i.Value))
-                {
+            if (skipScopeCheck || withinScope(logEvent))
+            {
                 if (logEvent.Properties.TryGetValue("EventGuid", out var eventGuidProp) &&
                     eventGuidProp is ScalarValue eventGuidScalar &&
                     Guid.TryParse(eventGuidScalar.Value?.ToString()!, out var eventGuid))
@@ -59,7 +63,7 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                 return false;
             }
         }
-        bool printLogEventStr(string? logEventStr)
+        bool printLogEventStr(string? logEventStr, bool skipScopeCheck)
         {
             if (string.IsNullOrWhiteSpace(logEventStr))
             {
@@ -67,7 +71,7 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
             }
             try
             {
-                return printLogEvent(LogEventReader.ReadFromString(logEventStr));
+                return printLogEvent(LogEventReader.ReadFromString(logEventStr), skipScopeCheck);
             }
             catch { }
             return false;
@@ -75,6 +79,7 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
         async Task printLogEventTail(int count, CancellationToken cancellationToken)
         {
             List<AbsolutePath> scannedLogFiles = [];
+            List<LogEvent> logEvents = [];
             int printedLines = 0;
             while (true)
             {
@@ -101,12 +106,22 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                     {
                         break;
                     }
-
-                    if (printLogEventStr(line))
+                    LogEvent? logEvent = null;
+                    try
                     {
+                        logEvent = LogEventReader.ReadFromString(line);
+                    }
+                    catch { }
+                    if (logEvent != null && withinScope(logEvent))
+                    {
+                        logEvents.Add(logEvent);
                         printedLines++;
                     }
                 }
+            }
+            foreach (var logEvent in logEvents.ToArray().Reverse())
+            {
+                printLogEvent(logEvent, true);
             }
         }
 
@@ -161,7 +176,7 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                     string? line = await streamReader.ReadLineAsync(ct);
                     if (line != null)
                     {
-                        printLogEventStr(line);
+                        printLogEventStr(line, false);
                     }
                     else
                     {
