@@ -778,6 +778,30 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         await runnerRuntimeHolder.Set(() => new(runnerRuntimeMap));
 
+        {
+            var runners = runnerRuntimeMap
+                .SelectMany(i => i.Value.Runners);
+            var buildingReplicaCount = runners
+                .Where(i => i.Value.Status == RunnerStatus.Building)
+                .Count();
+            var startingReplicaCount = runners
+                .Where(i => i.Value.Status == RunnerStatus.Starting)
+                .Count();
+            var readyReplicaCount = runners
+                .Where(i => i.Value.Status == RunnerStatus.Ready)
+                .Count();
+            var busyReplicaCount = runners
+                .Where(i => i.Value.Status == RunnerStatus.Busy)
+                .Count();
+
+            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["IsRunnerStatus"] = true
+            });
+
+            _logger.LogInformation("Status: Total Runners: {RunnersCount}, Building {BuildingRunnersCount}, Starting {StartingRunnersCount}, Ready {ReadyRunnersCount}, Busy {BusyRunnersCount}", runners.Count(), buildingReplicaCount, startingReplicaCount, readyReplicaCount, busyReplicaCount);
+        }
+
         _logger.LogDebug("Runner routine end");
     }
 

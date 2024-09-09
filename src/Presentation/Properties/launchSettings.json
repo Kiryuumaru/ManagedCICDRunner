@@ -2,7 +2,7 @@
   "profiles": {
     "logs": {
       "commandName": "Project",
-      "commandLineArgs": "logs -t 1000 -l Verbose -f -s \"VagrantAction=Build\"",
+      "commandLineArgs": "logs -t 1000 -l Verbose -f -s \"IsRunnerStatus=True\"",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
@@ -11,7 +11,7 @@
     "http": {
       "commandName": "Project",
       "commandLineArgs": "run -s",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "launchUrl": "swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",

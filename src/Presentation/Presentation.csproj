@@ -27,4 +27,13 @@
 		<ProjectReference Include="..\Infrastructure.SQLite.LocalStore\Infrastructure.SQLite.LocalStore.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <None Update="Vagrantfiles\Ubuntu2204Vagrantfile">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </None>
+	  <None Update="Vagrantfiles\Windows11Vagrantfile">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </None>
+	</ItemGroup>
+
 </Project>
