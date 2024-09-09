@@ -190,6 +190,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
+                //_logger.LogDebug("Generating ssh keys {VagrantBuildId}", buildId);
+                //await GenerateSshKey(boxPath);
+
                 _logger.LogDebug("Building vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
@@ -911,5 +914,16 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         catch { }
 
         return vagrantReplicaState;
+    }
+
+    private async Task GenerateSshKey(AbsolutePath dir)
+    {
+        var keygen = new SshKeyGenerator.SshKeyGenerator(4096);
+        var privateKey = keygen.ToPrivateKey();
+        var publicKey = keygen.ToRfcPublicKey("ManagedCICDRunner");
+        var privateKeyPath = dir / "private_key";
+        var publicKeyPath = dir / "public_key";
+        await privateKeyPath.WriteAllText(privateKey);
+        await publicKeyPath.WriteAllText(publicKey);
     }
 }

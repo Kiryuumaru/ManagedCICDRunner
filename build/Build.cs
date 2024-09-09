@@ -99,7 +99,7 @@ class Build : BaseNukeBuildHelpers
                 definitionArch.WorkflowId($"build_{os}_{arch}");
                 definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
                 definitionArch.ReleaseAsset(context => GetAssets(os, arch));
-                definitionArch.Execute(context =>
+                definitionArch.Execute(async context =>
                 {
                     var outAsset = GetOutAsset(os, arch);
                     var archivePath = outAsset.Parent / outAsset.NameWithoutExtension;
@@ -125,6 +125,8 @@ class Build : BaseNukeBuildHelpers
 
                     (RootDirectory / "src" / "Presentation" / "Vagrantfiles").CopyTo(outPath / "Vagrantfiles");
 
+                    await (outPath / "Presentation.exe").MoveTo(outPath / "ManagedCICDRunner.exe");
+
                     if (os == "linux")
                     {
                         archivePath.TarGZipTo(outAsset);
@@ -143,13 +145,13 @@ class Build : BaseNukeBuildHelpers
                         (OutputDirectory / $"installer_{os}_{arch}.ps1").WriteAllText((RootDirectory / "installerTemplate.ps1").ReadAllText()
                             .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                             .Replace("{{$appname}}", $"ManagedCICDRunner_{os}_{arch}")
-                            .Replace("{{$appexec}}", "Presentation.exe")
+                            .Replace("{{$appexec}}", "ManagedCICDRunner.exe")
                             .Replace("{{$rootextract}}", $"ManagedCICDRunner_{os}_{arch}"));
 
                         (OutputDirectory / $"uninstaller_{os}_{arch}.ps1").WriteAllText((RootDirectory / "uninstallerTemplate.ps1").ReadAllText()
                             .Replace("{{$repo}}", "Kiryuumaru/ManagedCICDRunner")
                             .Replace("{{$appname}}", $"ManagedCICDRunner_{os}_{arch}")
-                            .Replace("{{$appexec}}", "Presentation.exe")
+                            .Replace("{{$appexec}}", "ManagedCICDRunner.exe")
                             .Replace("{{$rootextract}}", $"ManagedCICDRunner_{os}_{arch}"));
                     }
                 });
