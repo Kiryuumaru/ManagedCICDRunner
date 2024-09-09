@@ -52,7 +52,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
     private AbsolutePath VagrantHomePath => DataPath / "data";
 
-    private Dictionary<string, string?> VagrantEnvVars => new() { ["VAGRANT_HOME"] = VagrantHomePath };
+    private Dictionary<string, string?> VagrantEnvVars => new()
+    {
+        ["VAGRANT_HOME"] = VagrantHomePath,
+        ["VAGRANT_DEFAULT_PROVIDER"] = "hyperv"
+    };
 
     private readonly ExecutorLocker locker = new();
 
