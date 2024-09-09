@@ -53,9 +53,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await WaitFeature("Microsoft-Hyper-V-All", stoppingToken);
-        await WaitFeature("HypervisorPlatform", stoppingToken);
-        await WaitFeature("VirtualMachinePlatform", stoppingToken);
+        await WaitRequiredFeatures(stoppingToken);
 
         using var scope = _serviceProvider.CreateScope();
         var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
@@ -65,22 +63,32 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
     }
 
-    private async Task WaitFeature(string featureName, CancellationToken stoppingToken)
+    private async Task WaitRequiredFeatures(CancellationToken stoppingToken)
     {
-        _logger.LogDebug("Verifying feature {featureName} is enabled", featureName);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                string enabledHypervRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsOptionalFeature -FeatureName {featureName} -Online).State"], stoppingToken: stoppingToken);
-                enabledHypervRaw = enabledHypervRaw.Trim();
-                if (enabledHypervRaw.Equals("enabled", StringComparison.InvariantCultureIgnoreCase))
+                bool allEnabled = true;
+                foreach (var feat in await WindowsOSHelpers.GetRequiredFeatures(stoppingToken))
+                {
+                    _logger.LogDebug("Verifying feature {featureName} is enabled", feat);
+                    if (!await WindowsOSHelpers.IsFeatureEnabled(feat, stoppingToken))
+                    {
+                        _logger.LogError("{featureName} is not enabled", feat);
+                        allEnabled = false;
+                        break;
+                    }
+                }
+                if (allEnabled)
                 {
                     break;
                 }
             }
-            catch { }
-            _logger.LogError("{featureName} is not enabled", featureName);
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to check required features: (Error)", ex);
+            }
             await Task.Delay(2000, stoppingToken);
         }
     }
