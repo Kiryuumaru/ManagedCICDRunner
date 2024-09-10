@@ -6,13 +6,13 @@ using System.Threading.Tasks;
 
 namespace Application.Common;
 
-internal static class WindowsOSHelpers
+public static class WindowsOSHelpers
 {
     public static async Task<string[]> GetRequiredFeatures(CancellationToken stoppingToken)
     {
         if (await IsWindowsServer(stoppingToken))
         {
-            return ["Hyper-V", "HypervisorPlatform", "VirtualMachinePlatform"];
+            return ["Hyper-V"];
         }
         else
         {
@@ -36,7 +36,7 @@ internal static class WindowsOSHelpers
     {
         if (await IsWindowsServer(stoppingToken))
         {
-            string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsFeature -Name {featureName}) -eq $false"], stoppingToken: stoppingToken);
+            string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsFeature -Name {featureName}).Installed"], stoppingToken: stoppingToken);
             enabledFeatureRaw = enabledFeatureRaw.Trim();
             if (enabledFeatureRaw.Equals("true", StringComparison.InvariantCultureIgnoreCase))
             {
