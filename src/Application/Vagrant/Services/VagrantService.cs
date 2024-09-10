@@ -892,5 +892,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         var publicKeyPath = path / "public_key";
         await privateKeyPath.WriteAllText(privateKey, cancellationToken);
         await publicKeyPath.WriteAllText(publicKey, cancellationToken);
+        await WindowsOSHelpers.TakeOwnPermission(privateKeyPath, cancellationToken);
+        await WindowsOSHelpers.TakeOwnPermission(publicKeyPath, cancellationToken);
     }
 }
