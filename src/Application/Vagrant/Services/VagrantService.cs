@@ -75,69 +75,62 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         await TempPath.Delete(cancellationToken);
 
-        bool isClientOk = false;
-
-        _logger.LogDebug("Checking vagrant version...");
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
-            isClientOk = true;
-        }
-        catch
-        {
-            _logger.LogDebug("Vagrant is not installed");
-        }
-
-        if (!isClientOk)
-        {
-            using var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
-
-            var clientInstallerDownloadPath = TempPath / "vagrant_2.4.1_windows_amd64.msi";
-
-            while (!cancellationToken.IsCancellationRequested)
+            _logger.LogDebug("Checking vagrant version...");
+            try
             {
-                try
+                await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+                break;
+            }
+            catch
+            {
+                _logger.LogDebug("Vagrant is not installed");
+            }
+
+            try
+            {
+                _logger.LogDebug("Downloading vagrant client installer...");
+
+                using var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
+
+                var clientInstallerDownloadPath = TempPath / "vagrant_windows_amd64.msi";
+
+                await ClientPath.Delete(cancellationToken);
+                await clientInstallerDownloadPath.Delete(cancellationToken);
+
+                ClientPath.CreateDirectory();
+                clientInstallerDownloadPath.Parent.CreateDirectory();
+
                 {
-                    _logger.LogDebug("Downloading vagrant client installer...");
-
-                    await ClientPath.Delete(cancellationToken);
-                    await clientInstallerDownloadPath.Delete(cancellationToken);
-
-                    ClientPath.CreateDirectory();
-                    clientInstallerDownloadPath.Parent.CreateDirectory();
-
-                    {
-                        using var response = await httpClient.GetAsync(_clientInstallerUri, cancellationToken);
-                        using var fileStream = new FileStream(clientInstallerDownloadPath, FileMode.CreateNew);
-                        await response.Content.CopyToAsync(fileStream, cancellationToken);
-                    }
-
-                    if (await clientInstallerDownloadPath.GetHashSHA512(cancellationToken) != _clientInstallerHash)
-                    {
-                        throw new Exception("Downloaded vagrant file is corrupted");
-                    }
-
-                    _logger.LogDebug("Downloading vagrant client installer done");
-
-                    _logger.LogDebug("Installing vagrant client...");
-
-                    await Cli.RunOnce("powershell", ["-c", $"Start-Process msiexec.exe -Wait -ArgumentList /a,\\\"{clientInstallerDownloadPath}\\\",/qn,TARGETDIR=\\\"{ClientPath}\\\""], TempPath, stoppingToken: cancellationToken);
-
-                    if (!ClientExecPath.FileExists())
-                    {
-                        throw new Exception("Vagrant client was not installed");
-                    }
-
-                    _logger.LogDebug("Installing vagrant client done");
-
-                    break;
+                    using var response = await httpClient.GetAsync(_clientInstallerUri, cancellationToken);
+                    using var fileStream = new FileStream(clientInstallerDownloadPath, FileMode.CreateNew);
+                    await response.Content.CopyToAsync(fileStream, cancellationToken);
                 }
-                catch (Exception ex)
+
+                if (await clientInstallerDownloadPath.GetHashSHA512(cancellationToken) != _clientInstallerHash)
                 {
-                   _logger.LogError("Error installing vagrant client: {err}", ex.Message);
-
-                    await Task.Delay(1000, cancellationToken);
+                    throw new Exception("Downloaded vagrant file is corrupted");
                 }
+
+                _logger.LogDebug("Downloading vagrant client installer done");
+
+                _logger.LogDebug("Installing vagrant client...");
+
+                await Cli.RunOnce("powershell", ["-c", $"Start-Process msiexec.exe -Wait -ArgumentList /a,\\\"{clientInstallerDownloadPath}\\\",/qn,TARGETDIR=\\\"{ClientPath}\\\""], TempPath, stoppingToken: cancellationToken);
+
+                if (!ClientExecPath.FileExists())
+                {
+                    throw new Exception("Vagrant client was not installed");
+                }
+
+                _logger.LogDebug("Installing vagrant client done");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error installing vagrant client: {err}", ex.Message);
+
+                await Task.Delay(1000, cancellationToken);
             }
         }
 
