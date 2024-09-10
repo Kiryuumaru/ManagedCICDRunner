@@ -163,20 +163,17 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         string vmGuest;
         string vmCommunicator;
         string guestSyncFolder;
-        string guestTmpFolder;
         if (runnerOSType == RunnerOSType.Linux)
         {
             vmGuest = ":linux";
             vmCommunicator = "ssh";
             guestSyncFolder = "/vagrant";
-            guestTmpFolder = "/tmp";
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
             vmGuest = ":windows";
             vmCommunicator = "winssh";
             guestSyncFolder = "C:/vagrant";
-            guestTmpFolder = "C:/tmp";
         }
         else
         {
@@ -195,7 +192,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                 end
-                config.vm.provision "file", source: "{boxPath.ToString().Replace("\\", "/")}/public_key", destination: "{guestTmpFolder}/public_key"
+                config.vm.provision "file", source: "{boxPath.ToString().Replace("\\", "/")}/public_key", destination: "./public_key"
                 config.vm.provision "shell", inline: <<-SHELL
 
                     {provisionScript.Replace(Environment.NewLine, $"{Environment.NewLine}        ")}
