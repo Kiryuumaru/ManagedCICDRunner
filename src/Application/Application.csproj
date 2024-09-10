@@ -8,14 +8,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <None Remove="handle.exe" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <EmbeddedResource Include="Assets\handle.exe" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<ProjectReference Include="..\Domain\Domain.csproj" />
 	</ItemGroup>
 
@@ -28,6 +20,7 @@
 		<PackageReference Include="CliWrap" Version="3.6.6" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
 		<PackageReference Include="RestfulHelpers" Version="1.7.53" />
+		<PackageReference Include="SshKeyGenerator" Version="1.1.51" />
 	</ItemGroup>
 
 	<ItemGroup>

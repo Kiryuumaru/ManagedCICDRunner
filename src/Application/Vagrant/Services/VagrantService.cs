@@ -203,23 +203,20 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
+                _logger.LogDebug("Generating ssh keys {VagrantBuildId}", buildId);
+                await GenerateSshKeys(boxPath, cancellationToken);
+
                 _logger.LogDebug("Building vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
                 _logger.LogDebug("Reloading vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["reload"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
-                _logger.LogDebug("Patching ssh permissions {VagrantBuildId}", buildId);
-                await WindowsOSHelpers.TakeOwnPermission(boxPath / ".vagrant" / "machines" / "default" / "hyperv" / "private_key", cancellationToken);
-
                 _logger.LogDebug("Packaging vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["package", "--output", packageBoxPath], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
                 _logger.LogDebug("Saving vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
-
-                _logger.LogDebug("Finalizing ssh permissions {VagrantBuildId}", buildId);
-                await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "boxes" / buildId / "0" / "hyperv" / "vagrant_private_key", cancellationToken);
 
                 _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
                 await DeleteVMCore(boxPath, buildId, cancellationToken);
@@ -279,7 +276,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = true
+                  config.ssh.insert_key = false
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                   end
@@ -513,7 +510,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = true
+                  config.ssh.insert_key = false
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.linked_clone = true
@@ -947,5 +944,16 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         catch { }
 
         return vagrantReplicaState;
+    }
+
+    private async Task GenerateSshKeys(AbsolutePath path, CancellationToken cancellationToken)
+    {
+        var keygen = new SshKeyGenerator.SshKeyGenerator(4096);
+        var privateKey = keygen.ToPrivateKey();
+        var publicKey = keygen.ToRfcPublicKey("ManagedCICDRunner");
+        var privateKeyPath = path / "private_key";
+        var publicKeyPath = path / "public_key";
+        await privateKeyPath.WriteAllText(privateKey, cancellationToken);
+        await publicKeyPath.WriteAllText(publicKey, cancellationToken);
     }
 }

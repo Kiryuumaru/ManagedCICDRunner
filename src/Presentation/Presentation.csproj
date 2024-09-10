@@ -28,6 +28,12 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <None Update="Provisioning\Ubuntu2204Vagrantfile">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+	  <None Update="Provisioning\Windows11Vagrantfile">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
 	  <None Update="Vagrantfiles\Ubuntu2204Vagrantfile">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </None>
