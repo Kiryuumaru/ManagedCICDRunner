@@ -1,13 +1,24 @@
+using AbsolutePathHelpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Application.Common;
 
 public static class WindowsOSHelpers
 {
+    public static async Task TakeOwnPermission(AbsolutePath filePath, CancellationToken cancellationToken)
+    {
+        await Cli.RunOnce("powershell", [$"TakeOwn /F \"{filePath}\""], stoppingToken: cancellationToken);
+        await Cli.RunOnce("powershell", [$"Icacls \"{filePath}\" /C /T /Inheritance:d"], stoppingToken: cancellationToken);
+        await Cli.RunOnce("powershell", [$"Icacls \"{filePath}\" /C /T /Remove:g Administrator \\\"Authenticated Users\\\" BUILTIN\\Administrators BUILTIN Everyone System Users"], stoppingToken: cancellationToken);
+        await Cli.RunOnce("powershell", [$"Icacls \"{filePath}\" /C /T /Grant ${{env:UserName}}:F"], stoppingToken: cancellationToken);
+        await Cli.RunOnce("powershell", [$"Icacls \"{filePath}\" /C /T /Grant:r ${{env:UserName}}:F"], stoppingToken: cancellationToken);
+    }
+
     public static async Task<string[]> GetRequiredFeatures(CancellationToken stoppingToken)
     {
         if (await IsWindowsServer(stoppingToken))

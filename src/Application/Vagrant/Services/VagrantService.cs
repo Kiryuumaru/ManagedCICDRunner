@@ -127,6 +127,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 }
             }
         }
+
+        _logger.LogDebug("Patching ssh permissions...");
+        await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+        await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "insecure_private_key", cancellationToken);
     }
 
     public async Task<VagrantBuild> Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, CancellationToken cancellationToken)
@@ -201,6 +205,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 _logger.LogDebug("Saving vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+
+                _logger.LogDebug("Finalizing ssh permissions {VagrantBuildId}", buildId);
+                await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "boxes" / buildId / "0" / "hyperv" / "vagrant_private_key", cancellationToken);
 
                 _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
                 await DeleteVMCore(boxPath, buildId, cancellationToken);
@@ -559,15 +566,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             try
             {
                 _logger.LogDebug("Executing a script on vagrant replica {VagrantReplicaId}", replicaId);
-
-                _logger.LogDebug("Fixing ssh permissions {VagrantBuildId}", buildId);
-                var sshPrivateKey = VagrantHomePath / "boxes" / buildId / "0" / "hyperv" / "vagrant_private_key";
-                await Cli.RunListenAndLog(_logger, "powershell", [$"TakeOwn /F \"{sshPrivateKey}\""], replicaPath, stoppingToken: cancellationToken);
-                await Cli.RunListenAndLog(_logger, "powershell", [$"Icacls \"{sshPrivateKey}\" /C /T /Inheritance:d"], replicaPath, stoppingToken: cancellationToken);
-                await Cli.RunListenAndLog(_logger, "powershell", [$"Icacls \"{sshPrivateKey}\" /C /T /Remove:g Administrator \\\"Authenticated Users\\\" BUILTIN\\Administrators BUILTIN Everyone System Users"], replicaPath, stoppingToken: cancellationToken);
-                await Cli.RunListenAndLog(_logger, "powershell", [$"Icacls \"{sshPrivateKey}\" /C /T /Grant ${{env:UserName}}:F"], replicaPath, stoppingToken: cancellationToken);
-                await Cli.RunListenAndLog(_logger, "powershell", [$"Icacls \"{sshPrivateKey}\" /C /T /Grant:r ${{env:UserName}}:F"], replicaPath, stoppingToken: cancellationToken);
-
+                
                 while (!isLocked)
                 {
                     await Task.Delay(500, cancellationToken);
