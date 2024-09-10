@@ -162,18 +162,18 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         string vmGuest;
         string vmCommunicator;
-        string vagrantSyncFolder;
+        string guestSyncFolder;
         if (runnerOSType == RunnerOSType.Linux)
         {
             vmGuest = ":linux";
             vmCommunicator = "ssh";
-            vagrantSyncFolder = "/vagrant";
+            guestSyncFolder = "/vagrant";
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
             vmGuest = ":windows";
             vmCommunicator = "winssh";
-            vagrantSyncFolder = "C:/vagrant";
+            guestSyncFolder = "C:/vagrant";
         }
         else
         {
@@ -186,13 +186,15 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.box = "{baseBuildId}"
                 config.vm.guest = {vmGuest}
                 config.vm.communicator = "{vmCommunicator}"
-                config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
+                config.vm.synced_folder ".", "{guestSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
                 config.ssh.insert_key = false
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                 end
+                config.vm.provision "file", source: "{boxPath}/public_key", destination: "{guestSyncFolder}/public_key"
                 config.vm.provision "shell", inline: <<-SHELL
+
                     {provisionScript.Replace(Environment.NewLine, $"{Environment.NewLine}        ")}
                 SHELL
             end
@@ -488,7 +490,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         AbsolutePath replicaFilePath = replicaPath / "replica.json";
 
         if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() ||
-            await replicaFilePath.Read<VagrantReplica>(cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
+            await replicaFilePath.Read<VagrantReplica>(JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
             await GetBuild(vagrantReplica.BuildId, cancellationToken) is not VagrantBuild vagrantBuild)
         {
             return;
