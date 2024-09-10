@@ -128,8 +128,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
         }
 
-        _logger.LogDebug("Patching ssh permissions...");
+        _logger.LogDebug("Checking vagrant version...");
         await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+        _logger.LogDebug("Patching ssh permissions...");
         await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "insecure_private_key", cancellationToken);
     }
 
