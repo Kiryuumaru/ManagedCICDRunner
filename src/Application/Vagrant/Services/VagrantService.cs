@@ -75,7 +75,20 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         await TempPath.Delete(cancellationToken);
 
-        if (!ClientExecPath.FileExists())
+        bool isClientOk = false;
+
+        _logger.LogDebug("Checking vagrant version...");
+        try
+        {
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+            isClientOk = true;
+        }
+        catch
+        {
+            _logger.LogDebug("Vagrant is not installed");
+        }
+
+        if (!isClientOk)
         {
             using var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
 
@@ -128,11 +141,12 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
         }
 
-        _logger.LogDebug("Checking vagrant version...");
-        await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
-
         _logger.LogDebug("Patching ssh permissions...");
         await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "insecure_private_key", cancellationToken);
+        foreach (var keyPath in (VagrantHomePath / "insecure_private_keys").GetFiles())
+        {
+            await WindowsOSHelpers.TakeOwnPermission(keyPath, cancellationToken);
+        }
     }
 
     public async Task<VagrantBuild> Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, CancellationToken cancellationToken)

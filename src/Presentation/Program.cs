@@ -46,7 +46,7 @@ return await parserResult
 
                 if (opts.AsService)
                 {
-                    appBuilder.Configuration["MAKE_LOGS"] = "svc";
+                    appBuilder.Configuration["MANAGED_CICD_RUNNER_MAKE_LOGS"] = "svc";
                 }
 
                 await appBuilder.Build().Run(ct);
@@ -95,7 +95,7 @@ return await parserResult
 
 CancellationToken SetupCli(LogEventLevel logEventLevel)
 {
-    appBuilder.Configuration["LOGGER_LEVEL"] = logEventLevel switch
+    appBuilder.Configuration["MANAGED_CICD_RUNNER_LOGGER_LEVEL"] = logEventLevel switch
     {
         LogEventLevel.Verbose => LogLevel.Trace.ToString(),
         LogEventLevel.Debug => LogLevel.Debug.ToString(),
