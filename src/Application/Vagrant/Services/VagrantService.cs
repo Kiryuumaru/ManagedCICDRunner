@@ -614,7 +614,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         AbsolutePath replicaFilePath = dir / "replica.json";
 
         if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() ||
-            await replicaFilePath.Read<VagrantReplica>(cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
+            await replicaFilePath.Read<VagrantReplica>(JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
             await GetBuild(vagrantReplica.BuildId, cancellationToken) is null)
         {
             return null;
