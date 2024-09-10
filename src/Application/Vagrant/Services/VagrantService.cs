@@ -186,7 +186,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.box = "{baseBuildId}"
                 config.vm.guest = {vmGuest}
                 config.vm.communicator = "{vmCommunicator}"
-                config.vm.synced_folder ".", "{guestSyncFolder}", disabled: true
+                config.vm.synced_folder ".", "{guestSyncFolder}", owner: "vagrant", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
                 config.ssh.insert_key = false
                 config.vm.provider "hyperv" do |hv|
