@@ -53,13 +53,16 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("Verifying required features...");
         await WaitRequiredFeatures(stoppingToken);
 
         using var scope = _serviceProvider.CreateScope();
         var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
 
+        _logger.LogInformation("Verifying vagrant client...");
         await vagrantService.VerifyClient(stoppingToken);
 
+        _logger.LogInformation("Starting runner routine...");
         RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
     }
 
