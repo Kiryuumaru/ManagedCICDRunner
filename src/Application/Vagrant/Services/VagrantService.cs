@@ -452,8 +452,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         await locker.Execute([buildId, replicaId], async () =>
         {
             isLocked = true;
-            var replicaState = await GetStateCore(replicaPath, cancellationToken);
-            while (replicaState != VagrantReplicaState.Running && !runTask.IsCompleted)
+            while (await GetStateCore(replicaPath, cancellationToken) != VagrantReplicaState.Running && !runTask.IsCompleted)
             {
                 await Task.Delay(1000, cancellationToken);
             }
@@ -577,29 +576,55 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     await Task.Delay(500, cancellationToken);
                 }
 
-                await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken))
+                CancellationTokenSource ctx = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var ct = ctx.Token;
+                List<Task> tasks = [];
+
+                tasks.Add(Task.Run(async () =>
                 {
-                    switch (cmdEvent)
+                    await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, VagrantEnvVars, stoppingToken: ct))
                     {
-                        case StandardOutputCommandEvent stdOut:
-                            _logger.LogDebug("{x}", stdOut.Text);
-                            break;
-                        case StandardErrorCommandEvent stdErr:
-                            _logger.LogDebug("{x}", stdErr.Text);
-                            break;
-                        case ExitedCommandEvent exited:
-                            var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
-                            if (exited.ExitCode != 0)
-                            {
-                                throw new Exception(msg);
-                            }
-                            else
-                            {
-                                _logger.LogDebug("{x}", msg);
-                            }
-                            break;
+                        switch (cmdEvent)
+                        {
+                            case StandardOutputCommandEvent stdOut:
+                                _logger.LogDebug("{x}", stdOut.Text);
+                                break;
+                            case StandardErrorCommandEvent stdErr:
+                                _logger.LogDebug("{x}", stdErr.Text);
+                                break;
+                            case ExitedCommandEvent exited:
+                                var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
+                                if (exited.ExitCode != 0)
+                                {
+                                    throw new Exception(msg);
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("{x}", msg);
+                                }
+                                break;
+                        }
                     }
-                }
+                    if (!ct.IsCancellationRequested)
+                    {
+                        ctx.Cancel();
+                    }
+
+                }, ct));
+
+                tasks.Add(Task.Run(async () =>
+                {
+                    while (!ct.IsCancellationRequested && await GetStateCore(replicaPath, cancellationToken) == VagrantReplicaState.Running)
+                    {
+                        await Task.Delay(2000);
+                    }
+                    if (!ct.IsCancellationRequested)
+                    {
+                        ctx.Cancel();
+                    }
+                }, ct));
+
+                await Task.WhenAny(tasks);
 
                 _logger.LogDebug("Script execution done on vagrant replica {VagrantReplicaId}", replicaId);
             }

@@ -36,21 +36,29 @@ public static class WindowsOSHelpers
     {
         if (await IsWindowsServer(stoppingToken))
         {
-            string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsFeature -Name {featureName}).Installed"], stoppingToken: stoppingToken);
-            enabledFeatureRaw = enabledFeatureRaw.Trim();
-            if (enabledFeatureRaw.Equals("true", StringComparison.InvariantCultureIgnoreCase))
+            try
             {
-                return true;
+                string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsFeature -Name {featureName}).Installed"], stoppingToken: stoppingToken);
+                enabledFeatureRaw = enabledFeatureRaw.Trim();
+                if (enabledFeatureRaw.Equals("true", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return true;
+                }
             }
+            catch { }
         }
         else
         {
-            string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsOptionalFeature -FeatureName {featureName} -Online).State"], stoppingToken: stoppingToken);
-            enabledFeatureRaw = enabledFeatureRaw.Trim();
-            if (enabledFeatureRaw.Equals("enabled", StringComparison.InvariantCultureIgnoreCase))
+            try
             {
-                return true;
+                string enabledFeatureRaw = await Cli.RunOnce("powershell", ["-c", $"(Get-WindowsOptionalFeature -FeatureName {featureName} -Online).State"], stoppingToken: stoppingToken);
+                enabledFeatureRaw = enabledFeatureRaw.Trim();
+                if (enabledFeatureRaw.Equals("enabled", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return true;
+                }
             }
+            catch { }
         }
         return false;
     }
