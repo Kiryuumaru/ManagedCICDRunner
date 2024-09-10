@@ -192,7 +192,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                 end
-                config.vm.provision "file", source: "{boxPath.ToString().Replace("\\", "/")}/public_key", destination: "./public_key"
+                config.vm.provision "file", source: "{boxPath.ToString().Replace("\\", "/")}/public_key", destination: "~/public_key"
                 config.vm.provision "shell", inline: <<-SHELL
 
                     {provisionScript.Replace(Environment.NewLine, $"{Environment.NewLine}        ")}
