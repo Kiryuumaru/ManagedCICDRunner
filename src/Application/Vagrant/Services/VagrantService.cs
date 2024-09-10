@@ -209,6 +209,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 _logger.LogDebug("Reloading vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["reload"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
+                _logger.LogDebug("Patching ssh permissions {VagrantBuildId}", buildId);
+                await WindowsOSHelpers.TakeOwnPermission(boxPath / ".vagrant" / "machines" / "default" / "hyperv" / "private_key", cancellationToken);
+
                 _logger.LogDebug("Packaging vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["package", "--output", packageBoxPath], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
@@ -276,7 +279,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = false
+                  config.ssh.insert_key = true
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                   end
@@ -510,7 +513,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = false
+                  config.ssh.insert_key = true
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.linked_clone = true
