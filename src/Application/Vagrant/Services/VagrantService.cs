@@ -276,7 +276,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = true
+                  config.ssh.insert_key = false
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                   end
@@ -510,7 +510,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                   config.vm.communicator = "{vmCommunicator}"
                   config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                   config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = true
+                  config.ssh.insert_key = false
                   config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.linked_clone = true
