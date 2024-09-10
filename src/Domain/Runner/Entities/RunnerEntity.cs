@@ -17,7 +17,9 @@ public class RunnerEntity
 
     public required bool Deleted { get; init; }
 
-    public required string Vagrantfile { get; init; }
+    public required string VagrantBox { get; init; }
+
+    public required string ProvisionScriptFile { get; init; }
 
     public required RunnerOSType RunnerOS { get; init; }
 

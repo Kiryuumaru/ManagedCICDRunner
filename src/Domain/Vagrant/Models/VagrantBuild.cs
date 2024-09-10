@@ -1,4 +1,5 @@
-﻿using Domain.Vagrant.Enums;
+﻿using Domain.Runner.Enums;
+using Domain.Vagrant.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,6 +13,8 @@ public class VagrantBuild
     public required string Id { get; init; }
 
     public required string VagrantFileHash { get; init; }
+
+    public required RunnerOSType RunnerOS { get; init; }
 
     public required string Rev { get; init; }
 }

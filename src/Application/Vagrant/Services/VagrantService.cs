@@ -100,7 +100,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 await clientInstallerDownloadPath.Delete(cancellationToken);
 
                 ClientPath.CreateDirectory();
-                clientInstallerDownloadPath.Parent.CreateDirectory();
+                clientInstallerDownloadPath.Parent?.CreateDirectory();
 
                 {
                     using var response = await httpClient.GetAsync(_clientInstallerUri, cancellationToken);
@@ -142,10 +142,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
     }
 
-    public async Task<VagrantBuild> Build(string buildId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, CancellationToken cancellationToken)
+    public async Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, Func<Task<string>> provisionScriptFactory, CancellationToken cancellationToken)
     {
-        string? vagrantFileHash = null;
-
         AbsolutePath boxPath = BuildPath / buildId;
         AbsolutePath buildFilePath = boxPath / "build.json";
         AbsolutePath packageBoxPath = boxPath / "package.box";
@@ -155,32 +153,66 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         string? currentVagrantFileHash = null;
         string? currentRev = null;
-        if (buildFilePath.FileExists() && await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson &&
-            buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) &&
-            buildJson.RootElement.TryGetProperty("rev", out var revProp) &&
-            vagrantFileHashProp.ValueKind == JsonValueKind.String &&
-            revProp.ValueKind == JsonValueKind.String)
+        if (buildFilePath.FileExists() &&
+            await buildFilePath.Read<VagrantBuild>(JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken) is VagrantBuild vagrantBuild)
         {
-            currentVagrantFileHash = vagrantFileHashProp.GetString()!;
-            currentRev = revProp.GetString()!;
+            currentVagrantFileHash = vagrantBuild.VagrantFileHash;
+            currentRev = vagrantBuild.Rev;
         }
 
-        string vagrantfileContent = await vagrantfileFactory(boxPath);
+        string vmGuest;
+        string vmCommunicator;
+        string vagrantSyncFolder;
+        if (runnerOSType == RunnerOSType.Linux)
+        {
+            vmGuest = ":linux";
+            vmCommunicator = "ssh";
+            vagrantSyncFolder = "/vagrant";
+        }
+        else if (runnerOSType == RunnerOSType.Windows)
+        {
+            vmGuest = ":windows";
+            vmCommunicator = "winssh";
+            vagrantSyncFolder = "C:/vagrant";
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
 
-        await vagrantfilePathTemp.WriteAllText(vagrantfileContent, cancellationToken);
-        vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512(cancellationToken);
+        string provisionScript = await provisionScriptFactory();
+        string vagrantFile = $"""
+            Vagrant.configure("2") do |config|
+                config.vm.box = "{baseBuildId}"
+                config.vm.guest = {vmGuest}
+                config.vm.communicator = "{vmCommunicator}"
+                config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
+                config.vm.network "public_network", bridge: "Default Switch"
+                config.ssh.insert_key = false
+                config.vm.provider "hyperv" do |hv|
+                    hv.enable_virtualization_extensions = true
+                end
+                config.vm.provision "shell", inline: <<-SHELL
+                    {provisionScript.Replace(Environment.NewLine, $"{Environment.NewLine}        ")}
+                SHELL
+            end
+            """;
+
+        await vagrantfilePathTemp.WriteAllText(vagrantFile, cancellationToken);
+        string vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512(cancellationToken);
         await boxPathTemp.WaitKillAll([], cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
-        VagrantBuild vagrantBuild = new()
+        VagrantBuild newVagrantBuild = new()
         {
             Id = buildId,
             VagrantFileHash = vagrantFileHash,
+            RunnerOS = runnerOSType,
             Rev = rev
         };
 
         if (vagrantFileHash == currentVagrantFileHash && currentRev == rev)
         {
-            return vagrantBuild;
+            return newVagrantBuild;
         }
 
         await locker.Execute(buildId, async () => {
@@ -190,7 +222,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 await DeleteCore(boxPath, buildId, cancellationToken);
             }
 
-            await vagrantfilePath.WriteAllText(vagrantfileContent, cancellationToken);
+            await vagrantfilePath.WriteAllText(vagrantFile, cancellationToken);
 
             using var _ = _logger.BeginScope(new Dictionary<string, object>
             {
@@ -221,13 +253,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
                 await DeleteVMCore(boxPath, buildId, cancellationToken);
 
-                var buildObj = new
-                {
-                    id = buildId,
-                    vagrantFileHash,
-                    rev
-                };
-                await buildFilePath.Write(buildObj, cancellationToken: cancellationToken);
+                await buildFilePath.Write(newVagrantBuild, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
 
                 _logger.LogDebug("Vagrant build was built {VagrantBuildId}", buildId);
             }
@@ -238,54 +264,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
         });
 
-        return vagrantBuild;
-    }
-
-    public Task<VagrantBuild> Build(string buildId, string rev, string vagrantfile, CancellationToken cancellationToken)
-    {
-        return Build(buildId, rev, _ => Task.FromResult(vagrantfile), cancellationToken);
-    }
-
-    public Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, string inputScript, CancellationToken cancellationToken)
-    {
-        return Build(buildId, rev, boxPath =>
-        {
-            string vmGuest;
-            string vmCommunicator;
-            string vagrantSyncFolder;
-            if (runnerOSType == RunnerOSType.Linux)
-            {
-                vmGuest = ":linux";
-                vmCommunicator = "ssh";
-                vagrantSyncFolder = "/vagrant";
-            }
-            else if (runnerOSType == RunnerOSType.Windows)
-            {
-                vmGuest = ":windows";
-                vmCommunicator = "winssh";
-                vagrantSyncFolder = "C:/vagrant";
-            }
-            else
-            {
-                throw new NotSupportedException();
-            }
-            return Task.FromResult($"""
-                Vagrant.configure("2") do |config|
-                  config.vm.box = "{baseBuildId}"
-                  config.vm.guest = {vmGuest}
-                  config.vm.communicator = "{vmCommunicator}"
-                  config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
-                  config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = false
-                  config.vm.provider "hyperv" do |hv|
-                    hv.enable_virtualization_extensions = true
-                  end
-                  config.vm.provision "shell", inline: <<-SHELL
-                    {inputScript}
-                  SHELL
-                end
-                """);
-        }, cancellationToken);
+        return newVagrantBuild;
     }
 
     public async Task<VagrantBuild?> GetBuild(string id, CancellationToken cancellationToken)
@@ -295,27 +274,13 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath buildFilePath = dir / "build.json";
 
-        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() || await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument buildJson ||
-            !buildJson.RootElement.TryGetProperty("id", out var idProp) ||
-            !buildJson.RootElement.TryGetProperty("vagrantFileHash", out var vagrantFileHashProp) ||
-            !buildJson.RootElement.TryGetProperty("rev", out var revProp) ||
-            idProp.ValueKind != JsonValueKind.String ||
-            vagrantFileHashProp.ValueKind != JsonValueKind.String ||
-            revProp.ValueKind != JsonValueKind.String)
+        if (!vagrantfilePath.FileExists() || !packageBoxPath.FileExists() || !buildFilePath.FileExists() ||
+            await buildFilePath.Read<VagrantBuild>(JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken) is not VagrantBuild vagrantBuild)
         {
             return null;
         }
 
-        string buildId = idProp.GetString()!;
-        string buildVagrantFileHash = vagrantFileHashProp.GetString()!;
-        string buildRev = revProp.GetString()!;
-
-        return new()
-        {
-            Id = buildId,
-            VagrantFileHash = buildVagrantFileHash,
-            Rev = buildRev
-        };
+        return vagrantBuild;
     }
 
     public async Task<Dictionary<string, VagrantBuild?>> GetBuilds(CancellationToken cancellationToken)
@@ -386,7 +351,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         });
     }
 
-    public async Task Run(string buildId, string replicaId, string rev, Func<AbsolutePath, Task<string>> vagrantfileFactory, Dictionary<string, string> labels, CancellationToken cancellationToken)
+    public async Task Run(string buildId, string replicaId, string rev, int cpus, int memoryGB, Dictionary<string, string> labels, CancellationToken cancellationToken)
     {
         AbsolutePath replicaPath = ReplicaPath / replicaId;
         AbsolutePath vagrantfilePath = replicaPath / "Vagrantfile";
@@ -396,6 +361,48 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         {
             throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica already exists");
         }
+
+        var vagrantBuild = await GetBuild(buildId, cancellationToken) ??
+            throw new Exception($"Error running vagrant replica \"{replicaId}\": BuildId {buildId} does not exists");
+
+        string vmGuest;
+        string vmCommunicator;
+        string vagrantSyncFolder;
+        if (vagrantBuild.RunnerOS == RunnerOSType.Linux)
+        {
+            vmGuest = ":linux";
+            vmCommunicator = "ssh";
+            vagrantSyncFolder = "/vagrant";
+        }
+        else if (vagrantBuild.RunnerOS == RunnerOSType.Windows)
+        {
+            vmGuest = ":windows";
+            vmCommunicator = "winssh";
+            vagrantSyncFolder = "C:/vagrant";
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+
+        string vagrantFile = $"""
+            Vagrant.configure("2") do |config|
+                config.vm.box = "{buildId}"
+                config.vm.guest = {vmGuest}
+                config.vm.communicator = "{vmCommunicator}"
+                config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
+                config.vm.network "public_network", bridge: "Default Switch"
+                config.ssh.insert_key = false
+                config.vm.provider "hyperv" do |hv|
+                    hv.enable_virtualization_extensions = true
+                    hv.linked_clone = true
+                    hv.memory = "{1024 * memoryGB}"
+                    hv.cpus = "{cpus}"
+                end
+                config.vm.provision "shell", inline: <<-SHELL
+                SHELL
+            end
+            """;
 
         bool isLocked = false;
         var runTask = Task.Run(async () => {
@@ -418,16 +425,16 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     await Task.Delay(500, cancellationToken);
                 }
 
-                var replicaObj = new
+                VagrantReplica vagrantReplica = new()
                 {
-                    buildId,
-                    replicaId,
-                    rev,
-                    labels
+                    BuildId = buildId,
+                    Id = replicaId,
+                    Rev = rev,
+                    Labels = labels
                 };
 
-                await replicaFilePath.Write(replicaObj, cancellationToken: cancellationToken);
-                await vagrantfilePath.WriteAllText(await vagrantfileFactory(replicaPath), cancellationToken: cancellationToken);
+                await replicaFilePath.Write(vagrantReplica, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
+                await vagrantfilePath.WriteAllText(vagrantFile, cancellationToken: cancellationToken);
 
                 await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, ["up", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken))
                 {
@@ -474,84 +481,25 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         await runTask;
     }
 
-    public Task Run(string buildId, string replicaId, string rev, string vagrantfile, Dictionary<string, string> labels, CancellationToken cancellationToken)
-    {
-        return Run(buildId, replicaId, rev, _ => Task.FromResult(vagrantfile), labels, cancellationToken);
-    }
-
-    public Task Run(RunnerOSType runnerOSType, string buildId, string replicaId, string rev, int cpus, int memoryGB, Dictionary<string, string> labels, CancellationToken cancellationToken)
-    {
-        return Run(buildId, replicaId, rev, replicaPath =>
-        {
-            string vmGuest;
-            string vmCommunicator;
-            string vagrantSyncFolder;
-            if (runnerOSType == RunnerOSType.Linux)
-            {
-                vmGuest = ":linux";
-                vmCommunicator = "ssh";
-                vagrantSyncFolder = "/vagrant";
-            }
-            else if (runnerOSType == RunnerOSType.Windows)
-            {
-                vmGuest = ":windows";
-                vmCommunicator = "winssh";
-                vagrantSyncFolder = "C:/vagrant";
-            }
-            else
-            {
-                throw new NotSupportedException();
-            }
-
-            return Task.FromResult($"""
-                Vagrant.configure("2") do |config|
-                  config.vm.box = "{buildId}"
-                  config.vm.guest = {vmGuest}
-                  config.vm.communicator = "{vmCommunicator}"
-                  config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
-                  config.vm.network "public_network", bridge: "Default Switch"
-                  config.ssh.insert_key = false
-                  config.vm.provider "hyperv" do |hv|
-                    hv.enable_virtualization_extensions = true
-                    hv.linked_clone = true
-                    hv.memory = "{1024 * memoryGB}"
-                    hv.cpus = "{cpus}"
-                  end
-                  config.vm.provision "shell", inline: <<-SHELL
-                  SHELL
-                end
-                """);
-        }, labels, cancellationToken);
-    }
-
-    public async Task Execute(RunnerOSType runnerOSType, string replicaId, Func<Task<string>> inputScriptFactory, CancellationToken cancellationToken)
+    public async Task Execute(string replicaId, Func<Task<string>> inputScriptFactory, CancellationToken cancellationToken)
     {
         AbsolutePath replicaPath = ReplicaPath / replicaId;
         AbsolutePath vagrantfilePath = replicaPath / "Vagrantfile";
         AbsolutePath replicaFilePath = replicaPath / "replica.json";
 
-        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson ||
-            !replicaJson.RootElement.TryGetProperty("buildId", out var buildIdProp) ||
-            !replicaJson.RootElement.TryGetProperty("replicaId", out var replicaIdProp) ||
-            !replicaJson.RootElement.TryGetProperty("rev", out var revProp) ||
-            !replicaJson.RootElement.TryGetProperty("labels", out var labelsProp) ||
-            buildIdProp.ValueKind != JsonValueKind.String ||
-            replicaIdProp.ValueKind != JsonValueKind.String ||
-            revProp.ValueKind != JsonValueKind.String ||
-            labelsProp.ValueKind != JsonValueKind.Object)
+        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() ||
+            await replicaFilePath.Read<VagrantReplica>(cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
+            await GetBuild(vagrantReplica.BuildId, cancellationToken) is not VagrantBuild vagrantBuild)
         {
             return;
         }
 
-        string buildId = buildIdProp.GetString()!;
-        string replicaRev = revProp.GetString()!;
-
         string vmCommunicator;
-        if (runnerOSType == RunnerOSType.Linux)
+        if (vagrantBuild.RunnerOS == RunnerOSType.Linux)
         {
             vmCommunicator = "ssh";
         }
-        else if (runnerOSType == RunnerOSType.Windows)
+        else if (vagrantBuild.RunnerOS == RunnerOSType.Windows)
         {
             vmCommunicator = "ssh";
         }
@@ -567,14 +515,14 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Execute),
-                ["VagrantBuildId"] = buildId,
-                ["VagrantReplicaId"] = replicaId,
-                ["VagrantReplicaRev"] = replicaRev
+                ["VagrantBuildId"] = vagrantBuild.Id,
+                ["VagrantReplicaId"] = vagrantReplica.Id,
+                ["VagrantReplicaRev"] = vagrantReplica.Rev
             });
 
             try
             {
-                _logger.LogDebug("Executing a script on vagrant replica {VagrantReplicaId}", replicaId);
+                _logger.LogDebug("Executing a script on vagrant replica {VagrantReplicaId}", vagrantReplica.Id);
                 
                 while (!isLocked)
                 {
@@ -657,45 +605,34 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         catch (OperationCanceledException) { }
     }
 
-    public async Task<VagrantReplica?> GetReplica(string id, CancellationToken cancellationToken)
+    public async Task<VagrantReplicaRuntime?> GetReplica(string id, CancellationToken cancellationToken)
     {
         AbsolutePath dir = ReplicaPath / id;
         AbsolutePath vagrantfilePath = dir / "Vagrantfile";
         AbsolutePath replicaFilePath = dir / "replica.json";
 
-        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() || await replicaFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is not JsonDocument replicaJson ||
-            !replicaJson.RootElement.TryGetProperty("buildId", out var buildIdProp) ||
-            !replicaJson.RootElement.TryGetProperty("replicaId", out var replicaIdProp) ||
-            !replicaJson.RootElement.TryGetProperty("rev", out var revProp) ||
-            !replicaJson.RootElement.TryGetProperty("labels", out var labelsProp) ||
-            buildIdProp.ValueKind != JsonValueKind.String ||
-            replicaIdProp.ValueKind != JsonValueKind.String ||
-            revProp.ValueKind != JsonValueKind.String ||
-            labelsProp.ValueKind != JsonValueKind.Object)
+        if (!vagrantfilePath.FileExists() || !replicaFilePath.FileExists() ||
+            await replicaFilePath.Read<VagrantReplica>(cancellationToken: cancellationToken) is not VagrantReplica vagrantReplica ||
+            await GetBuild(vagrantReplica.BuildId, cancellationToken) is null)
         {
             return null;
         }
-
-        string buildId = buildIdProp.GetString()!;
-        string replicaId = replicaIdProp.GetString()!;
-        string replicaRev = revProp.GetString()!;
-        var replicaLabels = labelsProp.EnumerateObject().ToDictionary(i => i.Name, i => i.Value.GetString()!)!;
 
         VagrantReplicaState vagrantReplicaState = await GetStateCore(dir, cancellationToken);
 
         return new()
         {
-            BuildId = buildId,
-            Id = replicaId,
-            Rev = replicaRev,
+            BuildId = vagrantReplica.BuildId,
+            Id = vagrantReplica.Id,
+            Rev = vagrantReplica.Rev,
             State = vagrantReplicaState,
-            Labels = replicaLabels
+            Labels = vagrantReplica.Labels
         };
     }
 
-    public async Task<Dictionary<string, VagrantReplica?>> GetReplicas(CancellationToken cancellationToken)
+    public async Task<Dictionary<string, VagrantReplicaRuntime?>> GetReplicas(CancellationToken cancellationToken)
     {
-        ConcurrentDictionary<string, VagrantReplica?> vagrantReplicas = [];
+        ConcurrentDictionary<string, VagrantReplicaRuntime?> vagrantReplicas = [];
         List<Task> tasks = [];
 
         foreach (var dir in ReplicaPath.GetDirectories())

@@ -11,7 +11,9 @@ public class RunnerAddDto
 {
     public required string TokenId { get; init; }
 
-    public required string Vagrantfile { get; init; }
+    public required string VagrantBox { get; init; }
+
+    public required string ProvisionScriptFile { get; init; }
 
     public required RunnerOSType RunnerOS { get; init; }
 

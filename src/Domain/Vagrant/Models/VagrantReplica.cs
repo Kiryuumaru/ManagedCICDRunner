@@ -15,7 +15,5 @@ public class VagrantReplica
 
     public required string Rev { get; init; }
 
-    public required VagrantReplicaState State { get; init; }
-
     public required Dictionary<string, string> Labels { get; init; }
 }

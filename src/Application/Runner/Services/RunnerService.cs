@@ -103,10 +103,17 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             return result;
         }
 
-        if (string.IsNullOrEmpty(runnerAddDto.Vagrantfile))
+        if (string.IsNullOrEmpty(runnerAddDto.VagrantBox))
         {
             result.WithStatusCode(HttpStatusCode.BadRequest);
-            result.WithError("RUNNER_IMAGE_INVALID", "Runner image is invalid");
+            result.WithError("RUNNER_VAGRANT_BOX_INVALID", "Runner vagrant box is invalid");
+            return result;
+        }
+
+        if (string.IsNullOrEmpty(runnerAddDto.ProvisionScriptFile))
+        {
+            result.WithStatusCode(HttpStatusCode.BadRequest);
+            result.WithError("RUNNER_PROVISION_SCRIPT_INVALID", "Runner provision script is invalid");
             return result;
         }
 
@@ -146,7 +153,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Id = StringHelpers.Random(6, false).ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
-            Vagrantfile = runnerAddDto.Vagrantfile,
+            VagrantBox = runnerAddDto.VagrantBox,
+            ProvisionScriptFile = runnerAddDto.ProvisionScriptFile,
             RunnerOS = runnerAddDto.RunnerOS,
             Replicas = runnerAddDto.Replicas,
             MaxReplicas = runnerAddDto.MaxReplicas,
@@ -206,7 +214,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Id = runner.Id.ToLowerInvariant(),
             Rev = StringHelpers.Random(6, false).ToLowerInvariant(),
             Deleted = false,
-            Vagrantfile = !string.IsNullOrEmpty(runnerEditDto.NewVagrantfile) ? runnerEditDto.NewVagrantfile : runner.Vagrantfile,
+            VagrantBox = !string.IsNullOrEmpty(runnerEditDto.NewVagrantBox) ? runnerEditDto.NewVagrantBox : runner.VagrantBox,
+            ProvisionScriptFile = !string.IsNullOrEmpty(runnerEditDto.NewProvisionScriptFile) ? runnerEditDto.NewProvisionScriptFile : runner.ProvisionScriptFile,
             RunnerOS = runnerEditDto.NewRunnerOS ?? runner.RunnerOS,
             Replicas = runnerEditDto.NewReplicas ?? runner.Replicas,
             MaxReplicas = runnerEditDto.NewMaxReplicas ?? runner.MaxReplicas,
@@ -282,7 +291,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
                 Id = runner.Id,
                 Rev = runner.Rev,
                 Deleted = true,
-                Vagrantfile = runner.Vagrantfile,
+                VagrantBox = runner.VagrantBox,
+                ProvisionScriptFile = runner.ProvisionScriptFile,
                 RunnerOS = runner.RunnerOS,
                 Replicas = runner.Replicas,
                 MaxReplicas = runner.MaxReplicas,

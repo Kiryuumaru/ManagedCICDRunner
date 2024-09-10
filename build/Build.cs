@@ -123,7 +123,7 @@ class Build : BaseNukeBuildHelpers
                         .EnablePublishSingleFile()
                         .SetOutput(outPath));
 
-                    (RootDirectory / "src" / "Presentation" / "Vagrantfiles").CopyTo(outPath / "Vagrantfiles");
+                    await (RootDirectory / "src" / "Presentation" / "Provisioning").CopyTo(outPath / "Provisioning");
 
                     await (outPath / "Presentation.exe").MoveTo(outPath / "ManagedCICDRunner.exe");
 

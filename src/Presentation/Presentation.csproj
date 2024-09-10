@@ -28,16 +28,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <None Update="Provisioning\Ubuntu2204Vagrantfile">
+	  <None Update="Provisioning\ubuntu-22.04-cicd.runner.sh">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </None>
-	  <None Update="Provisioning\Windows11Vagrantfile">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </None>
-	  <None Update="Vagrantfiles\Ubuntu2204Vagrantfile">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </None>
-	  <None Update="Vagrantfiles\Windows11Vagrantfile">
+	  <None Update="Provisioning\windows-11-cicd.runner.ps1">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </None>
 	</ItemGroup>

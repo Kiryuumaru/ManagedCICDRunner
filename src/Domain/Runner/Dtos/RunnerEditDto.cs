@@ -9,7 +9,9 @@ namespace Domain.Runner.Dtos;
 
 public class RunnerEditDto
 {
-    public string? NewVagrantfile { get; init; }
+    public string? NewVagrantBox { get; init; }
+
+    public string? NewProvisionScriptFile { get; init; }
 
     public RunnerOSType? NewRunnerOS { get; init; }
 

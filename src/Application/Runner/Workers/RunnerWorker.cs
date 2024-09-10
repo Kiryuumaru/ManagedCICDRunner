@@ -90,7 +90,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to check required features: (Error)", ex);
+                _logger.LogError("Failed to check required features: {Error}", ex);
             }
             await Task.Delay(2000, stoppingToken);
         }
@@ -348,7 +348,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         await Task.WhenAll(runnersEntitiesDeleteTasks);
 
         _logger.LogDebug("Removing dangling runner actions...");
-        Dictionary<string, VagrantReplica?> vagrantReplicaToRemove = [];
+        Dictionary<string, VagrantReplicaRuntime?> vagrantReplicaToRemove = [];
         Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionsToRemove = [];
         foreach (var vagrantReplicaPair in vagrantReplicas)
         {
@@ -580,9 +580,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 {
                     string id = $"{RunnerIdentifier}-{runnerControllerId}-{runnerRuntime.RunnerEntity.Id.ToLowerInvariant()}";
                     string replicaId = $"{id}-{runnerRuntime.RunnerRev.ToLowerInvariant()}-{StringHelpers.Random(6, false).ToLowerInvariant()}";
-                    string baseVagrantfile = await GetPath(runnerRuntime.RunnerEntity.Vagrantfile).ReadAllText(stoppingToken);
+                    string provisionScriptFile = await GetPath(runnerRuntime.RunnerEntity.ProvisionScriptFile).ReadAllText(stoppingToken);
                     string baseVagrantBuildId = $"{id}-base";
                     string vagrantBuildId = $"{id}";
+                    string vagrantBox = runnerRuntime.RunnerEntity.VagrantBox;
                     string runnerId = runnerRuntime.RunnerEntity.Id;
                     int cpus = runnerRuntime.RunnerEntity.Cpus;
                     int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
@@ -701,7 +702,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     string baseRev;
                                     try
                                     {
-                                        var baseBuild = await vagrantService.Build(baseVagrantBuildId, "base", baseVagrantfile, stoppingToken);
+                                        var baseBuild = await vagrantService.Build(runnerOs, vagrantBox, baseVagrantBuildId, "base", () => Task.FromResult(provisionScriptFile), stoppingToken);
                                         baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
                                     }
                                     catch
@@ -715,7 +716,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, bootstrapInputScript, stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, () => Task.FromResult(bootstrapInputScript), stoppingToken);
                                     }
                                     catch
                                     {
@@ -736,7 +737,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                             {
                                                 _logger.LogInformation("Runner starting OS: {id}", replicaId);
 
-                                                await vagrantService.Run(runnerOs, vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
+                                                await vagrantService.Run(vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
                                             }
                                             catch (Exception ex)
                                             {
@@ -747,7 +748,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                                             try
                                             {
-                                                await vagrantService.Execute(runnerOs, replicaId, runnerInputScriptFactory, stoppingToken);
+                                                await vagrantService.Execute(replicaId, runnerInputScriptFactory, stoppingToken);
                                             }
                                             catch (Exception ex)
                                             {
