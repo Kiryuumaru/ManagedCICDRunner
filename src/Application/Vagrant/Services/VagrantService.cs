@@ -320,9 +320,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         try
         {
-            if (await buildFilePath.Read<JsonDocument>(cancellationToken: cancellationToken) is JsonDocument buildJson)
+            if (await GetBuild(buildId, cancellationToken) is VagrantBuild vagrantBuild)
             {
-                buildId = buildJson.RootElement.GetProperty("id").GetString()!;
+                buildId = vagrantBuild.Id;
             }
         }
         catch { }
