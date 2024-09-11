@@ -193,11 +193,12 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
 
         var hostPublicKey = $"{boxPath.ToString().Replace("\\", "/")}/public_key";
+        var guestPublicTmpKey = $"{guestTmpFolder}/public_key";
         var guestAppendKeys = guestAppendCommand
-            .Replace("FROM_FILE", $"{guestTmpFolder}/public_key")
+            .Replace("FROM_FILE", guestPublicTmpKey)
             .Replace("TO_FILE", guestSshAuthorizedKeysPath);
         var guestAppendRootKeys = guestAppendCommand
-            .Replace("FROM_FILE", $"{guestTmpFolder}/public_key")
+            .Replace("FROM_FILE", guestPublicTmpKey)
             .Replace("TO_FILE", guestRootSshAuthorizedKeysPath);
 
         string provisionScript = await provisionScriptFactory();
@@ -212,7 +213,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                 end
-                config.vm.provision "file", source: "{hostPublicKey}", destination: "{guestTmpFolder}/public_key"
+                config.vm.provision "file", source: "{hostPublicKey}", destination: "{guestPublicTmpKey}"
                 config.vm.provision 'shell', inline: "{guestAppendKeys}", privileged: false
                 config.vm.provision 'shell', inline: "{guestAppendRootKeys}"
                 config.vm.provision "shell", inline: <<-SHELL
