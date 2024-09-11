@@ -163,22 +163,42 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         string vmGuest;
         string vmCommunicator;
         string guestSyncFolder;
+        string guestTmpFolder;
+        string guestSshAuthorizedKeysPath;
+        string guestRootSshAuthorizedKeysPath;
+        string guestAppendCommand;
         if (runnerOSType == RunnerOSType.Linux)
         {
             vmGuest = ":linux";
             vmCommunicator = "ssh";
             guestSyncFolder = "/vagrant";
+            guestTmpFolder = "/tmp/provision";
+            guestSshAuthorizedKeysPath = "/home/vagrant/.ssh/authorized_keys";
+            guestRootSshAuthorizedKeysPath = "/root/.ssh/authorized_keys";
+            guestAppendCommand = "cat FROM_FILE >> TO_FILE";
         }
         else if (runnerOSType == RunnerOSType.Windows)
         {
             vmGuest = ":windows";
             vmCommunicator = "winssh";
             guestSyncFolder = "C:/vagrant";
+            guestTmpFolder = "C:/tmp/provision";
+            guestSshAuthorizedKeysPath = "C:/Users/vagrant/.ssh/authorized_keys";
+            guestRootSshAuthorizedKeysPath = "C:/ProgramData/ssh/administrators_authorized_keys";
+            guestAppendCommand = "Get-Content FROM_FILE | Add-Content TO_FILE";
         }
         else
         {
             throw new NotSupportedException();
         }
+
+        var hostPublicKey = $"{boxPath.ToString().Replace("\\", "/")}/public_key";
+        var guestAppendKeys = guestAppendCommand
+            .Replace("FROM_FILE", $"{guestTmpFolder}/public_key")
+            .Replace("TO_FILE", guestSshAuthorizedKeysPath);
+        var guestAppendRootKeys = guestAppendCommand
+            .Replace("FROM_FILE", $"{guestTmpFolder}/public_key")
+            .Replace("TO_FILE", guestRootSshAuthorizedKeysPath);
 
         string provisionScript = await provisionScriptFactory();
         string vagrantFile = $"""
@@ -192,10 +212,13 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                 end
-                config.vm.provision "file", source: "{boxPath.ToString().Replace("\\", "/")}/public_key", destination: "~/public_key"
+                config.vm.provision "file", source: "{hostPublicKey}", destination: "{guestTmpFolder}/public_key"
+                config.vm.provision 'shell', inline: "{guestAppendKeys}", privileged: false
+                config.vm.provision 'shell', inline: "{guestAppendRootKeys}"
                 config.vm.provision "shell", inline: <<-SHELL
 
                     {provisionScript.Replace(Environment.NewLine, $"{Environment.NewLine}        ")}
+
                 SHELL
             end
             """;
