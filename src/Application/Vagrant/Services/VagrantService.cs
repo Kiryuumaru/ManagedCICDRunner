@@ -207,8 +207,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{guestSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
+                config.vm.boot_timeout = 600
                 __ADDITIONAL_CONFIG__
                 config.vm.provider "hyperv" do |hv|
+                    hv.ip_address_timeout = 300
                     hv.enable_virtualization_extensions = true
                 end
                 config.vm.provision "file", source: "{hostPublicKey.ToString().Replace("\\", "\\\\")}", destination: "{guestPublicTmpKey.Replace("\\", "\\\\")}"
@@ -434,9 +436,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
+                config.vm.boot_timeout = 600
                 config.ssh.insert_key = false
                 config.ssh.private_key_path = ["{hostPrivateKey.ToString().Replace("\\", "\\\\")}"]
                 config.vm.provider "hyperv" do |hv|
+                    hv.ip_address_timeout = 300
                     hv.enable_virtualization_extensions = true
                     hv.linked_clone = true
                     hv.memory = "{1024 * memoryGB}"
