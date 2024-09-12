@@ -199,10 +199,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             throw new NotSupportedException();
         }
 
-        string guestSshKeys = "[" +
-            $"\"{hostPrivateKey.ToString().Replace("\\", "\\\\")}\"" +
-            "]";
-
         string provisionScript = await provisionScriptFactory();
         string vagrantFileTemplate = $"""
             Vagrant.configure("2") do |config|
@@ -211,7 +207,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{guestSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
-                config.ssh.insert_key = true
                 __ADDITIONAL_CONFIG__
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
@@ -226,8 +221,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 SHELL
             end
             """;
-        string vagrantFileInitial = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", "");
-        string vagrantFileFinal = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", $"config.ssh.private_key_path = {guestSshKeys}");
+        string vagrantFileInitial = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", "config.ssh.insert_key = true");
+        string vagrantFileFinal = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", $"config.ssh.insert_key = false\n    config.ssh.private_key_path = ["{hostPrivateKey.ToString().Replace("\\", "\\\\")}"]");
 
         await vagrantfilePathTemp.WriteAllText(vagrantFileFinal, cancellationToken);
         string vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512(cancellationToken);
@@ -432,10 +427,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             throw new NotSupportedException();
         }
 
-        string guestSshKeys = "[" +
-            $"\"{hostPrivateKey.ToString().Replace("\\", "\\\\")}\"" +
-            "]";
-
         string vagrantFile = $"""
             Vagrant.configure("2") do |config|
                 config.vm.box = "{buildId}"
@@ -443,7 +434,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
-                config.ssh.private_key_path = {guestSshKeys}
+                config.ssh.insert_key = false
+                config.ssh.private_key_path = ["{hostPrivateKey.ToString().Replace("\\", "\\\\")}"]
                 config.vm.provider "hyperv" do |hv|
                     hv.enable_virtualization_extensions = true
                     hv.linked_clone = true
