@@ -61,18 +61,6 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
             }
             Log.Write(logEvent);
         }
-        void printLogEventStr(string? logEventStr)
-        {
-            if (string.IsNullOrWhiteSpace(logEventStr))
-            {
-                return;
-            }
-            try
-            {
-                printLogEvent(LogEventReader.ReadFromString(logEventStr));
-            }
-            catch { }
-        }
         async Task printLogEventTail(int count, CancellationToken cancellationToken)
         {
             List<AbsolutePath> scannedLogFiles = [];
@@ -181,7 +169,11 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                     LogEvent? logEvent = null;
                     try
                     {
-                        logEvent = LogEventReader.ReadFromString(await streamReader.ReadLineAsync(ct));
+                        string? line = await streamReader.ReadLineAsync(ct);
+                        if (line != null)
+                        {
+                            logEvent = LogEventReader.ReadFromString(line);
+                        }
                     }
                     catch { }
                     if (logEvent != null)
