@@ -51,40 +51,27 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                 Log.Write(FromLogEvent(logEvent, "===================================================="));
             }
         }
-        bool printLogEvent(LogEvent logEvent, bool skipScopeCheck, bool skipStampLog)
+        void printLogEvent(LogEvent logEvent)
         {
-            if (!skipStampLog)
+            if (logEvent.Properties.TryGetValue("EventGuid", out var eventGuidProp) &&
+                eventGuidProp is ScalarValue eventGuidScalar &&
+                Guid.TryParse(eventGuidScalar.Value?.ToString()!, out var eventGuid))
             {
-                stampLog(logEvent);
+                lastLog = eventGuid;
             }
-            if (skipScopeCheck || isWithinScope(logEvent))
-            {
-                if (logEvent.Properties.TryGetValue("EventGuid", out var eventGuidProp) &&
-                    eventGuidProp is ScalarValue eventGuidScalar &&
-                    Guid.TryParse(eventGuidScalar.Value?.ToString()!, out var eventGuid))
-                {
-                    lastLog = eventGuid;
-                }
-                Log.Write(logEvent);
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            Log.Write(logEvent);
         }
-        bool printLogEventStr(string? logEventStr, bool skipScopeCheck, bool skipStampLog)
+        void printLogEventStr(string? logEventStr)
         {
             if (string.IsNullOrWhiteSpace(logEventStr))
             {
-                return false;
+                return;
             }
             try
             {
-                return printLogEvent(LogEventReader.ReadFromString(logEventStr), skipScopeCheck, skipStampLog);
+                printLogEvent(LogEventReader.ReadFromString(logEventStr));
             }
             catch { }
-            return false;
         }
         async Task printLogEventTail(int count, CancellationToken cancellationToken)
         {
@@ -138,7 +125,7 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
                 stampLog(logEvent);
                 if (withinScope)
                 {
-                    printLogEvent(logEvent, true, true);
+                    printLogEvent(logEvent);
                 }
             }
         }
@@ -191,10 +178,19 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
 
                 while (!ct.IsCancellationRequested)
                 {
-                    string? line = await streamReader.ReadLineAsync(ct);
-                    if (line != null)
+                    LogEvent? logEvent = null;
+                    try
                     {
-                        printLogEventStr(line, false, false);
+                        logEvent = LogEventReader.ReadFromString(await streamReader.ReadLineAsync(ct));
+                    }
+                    catch { }
+                    if (logEvent != null)
+                    {
+                        stampLog(logEvent);
+                        if (isWithinScope(logEvent))
+                        {
+                            printLogEvent(logEvent);
+                        }
                     }
                     else
                     {

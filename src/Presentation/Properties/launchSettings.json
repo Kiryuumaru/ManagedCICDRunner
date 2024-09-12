@@ -4,18 +4,19 @@
       "commandName": "Project",
       "commandLineArgs": "logs -t 1000 -l Verbose -f -s \"IsRunnerStatus=True\"",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "MANAGED_CICD_RUNNER_DATA_PATH": "C:\\ManagedCICDRunner\\.data"
       },
       "dotnetRunMessages": true
     },
     "http": {
       "commandName": "Project",
       "commandLineArgs": "run -s",
-      "launchBrowser": false,
       "launchUrl": "swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ASPNETCORE_URLS": "http://*:23456"
+        "ASPNETCORE_URLS": "http://*:23456",
+        "MANAGED_CICD_RUNNER_DATA_PATH": "C:\\ManagedCICDRunner\\.data"
       },
       "dotnetRunMessages": true
     },
@@ -26,7 +27,8 @@
       "launchUrl": "swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ASPNETCORE_URLS": "https://*:23456;http://*:23457"
+        "ASPNETCORE_URLS": "https://*:23456;http://*:23457",
+        "MANAGED_CICD_RUNNER_DATA_PATH": "C:\\ManagedCICDRunner\\.data"
       },
       "dotnetRunMessages": true
     },
