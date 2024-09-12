@@ -222,7 +222,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             end
             """;
         string vagrantFileInitial = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", "config.ssh.insert_key = true");
-        string vagrantFileFinal = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", $"config.ssh.insert_key = false\n    config.ssh.private_key_path = ["{hostPrivateKey.ToString().Replace("\\", "\\\\")}"]");
+        string vagrantFileFinal = vagrantFileTemplate.Replace("__ADDITIONAL_CONFIG__", $"config.ssh.insert_key = false\n    config.ssh.private_key_path = [\"{hostPrivateKey.ToString().Replace("\\", "\\\\")}\"]");
 
         await vagrantfilePathTemp.WriteAllText(vagrantFileFinal, cancellationToken);
         string vagrantFileHash = await vagrantfilePathTemp.GetHashSHA512(cancellationToken);
