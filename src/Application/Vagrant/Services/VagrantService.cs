@@ -207,6 +207,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{guestSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
+                config.vm.box_check_update = false
                 config.vm.boot_timeout = 1800
                 __ADDITIONAL_CONFIG__
                 config.vm.provider "hyperv" do |hv|
@@ -439,6 +440,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.communicator = "{vmCommunicator}"
                 config.vm.synced_folder ".", "{vagrantSyncFolder}", disabled: true
                 config.vm.network "public_network", bridge: "Default Switch"
+                config.vm.box_check_update = false
                 config.vm.boot_timeout = 1800
                 config.ssh.insert_key = false
                 config.ssh.private_key_path = ["{hostPrivateKey.ToString().Replace("\\", "\\\\")}"]
