@@ -525,7 +525,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
         }, cancellationToken);
 
-        await locker.Execute([buildId, replicaId], async () =>
+        await locker.Execute(replicaId, async () =>
         {
             isLocked = true;
             while (await GetStateCore(replicaPath, cancellationToken) != VagrantReplicaState.Running && !runTask.IsCompleted)
