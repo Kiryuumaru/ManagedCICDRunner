@@ -293,8 +293,12 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 _logger.LogDebug("Saving vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["box", "add", packageBoxPath, "--name", buildId, "-f"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
-                _logger.LogDebug("Patching ssh keys permissions {VagrantBuildId}", buildId);
-                await WindowsOSHelpers.TakeOwnPermission(VagrantHomePath / "boxes" / buildId / "0" / "hyperv" / "vagrant_private_key", cancellationToken);
+                var generatedKeyPath = VagrantHomePath / "boxes" / buildId / "0" / "hyperv" / "vagrant_private_key";
+                if (generatedKeyPath.FileExists())
+                {
+                    _logger.LogDebug("Patching ssh keys permissions {VagrantBuildId}", buildId);
+                    await WindowsOSHelpers.TakeOwnPermission(generatedKeyPath, cancellationToken);
+                }
 
                 _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
                 await DeleteVMCore(boxPath, buildId, cancellationToken);
