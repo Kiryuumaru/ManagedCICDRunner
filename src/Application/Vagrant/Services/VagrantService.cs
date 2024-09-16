@@ -525,11 +525,20 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
         }, cancellationToken);
 
-        await locker.Execute(replicaId, async () =>
+        await locker.Execute([buildId, replicaId], async () =>
         {
             isLocked = true;
-            while (await GetStateCore(replicaPath, cancellationToken) != VagrantReplicaState.Running && !runTask.IsCompleted)
+            while (true)
             {
+                if (runTask.IsCompleted)
+                {
+                    break;
+                }
+                var replicaState = await GetStateCore(replicaPath, cancellationToken);
+                if (replicaState != VagrantReplicaState.NotCreated)
+                {
+                    break;
+                }
                 await Task.Delay(1000, cancellationToken);
             }
         });
