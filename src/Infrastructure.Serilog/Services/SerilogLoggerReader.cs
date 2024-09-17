@@ -35,6 +35,12 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
         }
         void stampLog(LogEvent logEvent)
         {
+            if (logEvent.Properties.TryGetValue("EventGuid", out var eventGuidProp) &&
+                eventGuidProp is ScalarValue eventGuidScalar &&
+                Guid.TryParse(eventGuidScalar.Value?.ToString()!, out var eventGuid))
+            {
+                lastLog = eventGuid;
+            }
             if (logEvent.Properties.TryGetValue("IsHeadLog", out var isHeadLogProp) &&
                 isHeadLogProp is ScalarValue isHeadLogScalar &&
                 bool.TryParse(isHeadLogScalar.Value?.ToString()!, out bool isHeadLog) &&
@@ -53,12 +59,6 @@ internal class SerilogLoggerReader(IConfiguration configuration) : ILoggerReader
         }
         void printLogEvent(LogEvent logEvent)
         {
-            if (logEvent.Properties.TryGetValue("EventGuid", out var eventGuidProp) &&
-                eventGuidProp is ScalarValue eventGuidScalar &&
-                Guid.TryParse(eventGuidScalar.Value?.ToString()!, out var eventGuid))
-            {
-                lastLog = eventGuid;
-            }
             Log.Write(logEvent);
         }
         async Task printLogEventTail(int count, CancellationToken cancellationToken)
