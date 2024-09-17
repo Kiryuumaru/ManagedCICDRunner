@@ -63,7 +63,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
     public async Task VerifyClient(CancellationToken cancellationToken)
     {
-        using var _ = _logger.BeginScope(new Dictionary<string, object>
+        using var _ = _logger.BeginScopeMap(new ()
         {
             ["Service"] = nameof(VagrantService),
             ["VagrantAction"] = nameof(VerifyClient)
@@ -76,9 +76,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         await TempPath.Delete(cancellationToken);
 
+        _logger.LogInformation("Verifying vagrant client...");
+
         while (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogDebug("Checking vagrant version...");
             try
             {
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["version"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
@@ -86,7 +87,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch
             {
-                _logger.LogDebug("Vagrant is not installed");
+                _logger.LogInformation("Vagrant client is not installed. Installing vagrant client...");
             }
 
             try
@@ -125,7 +126,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     throw new Exception("Vagrant client was not installed");
                 }
 
-                _logger.LogDebug("Installing vagrant client done");
+                _logger.LogInformation("Installing vagrant client done");
             }
             catch (Exception ex)
             {
@@ -141,6 +142,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         {
             await WindowsOSHelpers.TakeOwnPermission(keyPath, cancellationToken);
         }
+        _logger.LogDebug("Patching ssh keys permissions done");
+
+        _logger.LogInformation("Vagrant client verified");
     }
 
     public async Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, Func<Task<string>> provisionScriptFactory, CancellationToken cancellationToken)
@@ -248,10 +252,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             if (boxPath.DirectoryExists())
             {
-                await DeleteCore(boxPath, buildId, cancellationToken);
+                await DeleteCore(boxPath, null, cancellationToken);
             }
 
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Build),
@@ -262,14 +266,19 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
+                _logger.LogInformation("Starting vagrant build {VagrantBuildId}", buildId);
+
                 _logger.LogDebug("Generating initial vagrantfile {VagrantBuildId}", buildId);
                 await vagrantfilePath.WriteAllText(vagrantFileInitial, cancellationToken);
 
                 _logger.LogDebug("Generating ssh keys {VagrantBuildId}", buildId);
                 await GenerateSshKeys(buildId, boxPath, cancellationToken);
 
-                _logger.LogDebug("Starting vagrant build {VagrantBuildId}", buildId);
-                await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+                await locker.Execute(baseBuildId, async () =>
+                {
+                    _logger.LogDebug("Starting vagrant VM {VagrantBuildId}", buildId);
+                    await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);
+                });
 
                 var vmName = await GetVMName(buildId, cancellationToken);
                 if (string.IsNullOrEmpty(vmName))
@@ -301,11 +310,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 }
 
                 _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
-                await DeleteVMCore(boxPath, buildId, cancellationToken);
+                await DeleteVMCore(boxPath, vmName, cancellationToken);
 
                 await buildFilePath.Write(newVagrantBuild, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
 
-                _logger.LogDebug("Vagrant build was built {VagrantBuildId}", buildId);
+                _logger.LogInformation("Vagrant build was built {VagrantBuildId}", buildId);
             }
             catch (Exception ex)
             {
@@ -377,18 +386,18 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         await locker.Execute(buildId, async () =>
         {
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(DeleteBuild),
                 ["VagrantBuildId"] = buildId
             });
 
-            _logger.LogDebug("Deleting vagrant build {VagrantBuildId}", buildId);
+            _logger.LogInformation("Deleting vagrant build {VagrantBuildId}", buildId);
 
             try
             {
-                await DeleteCore(boxPath, id, cancellationToken);
+                await DeleteCore(boxPath, null, cancellationToken);
             }
             catch { }
             try
@@ -397,7 +406,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch { }
 
-            _logger.LogDebug("Deleted vagrant build {VagrantBuildId}", buildId);
+            _logger.LogInformation("Deleted vagrant build {VagrantBuildId}", buildId);
         });
     }
 
@@ -463,7 +472,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         bool isLocked = false;
         var runTask = Task.Run(async () => {
 
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Run),
@@ -474,7 +483,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
-                _logger.LogDebug("Running vagrant replica {VagrantReplicaId}", replicaId);
+                _logger.LogInformation("Starting vagrant replica {VagrantReplicaId}", replicaId);
 
                 while (!isLocked)
                 {
@@ -486,6 +495,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     BuildId = buildId,
                     Id = replicaId,
                     Rev = rev,
+                    VMName = null,
                     Labels = labels
                 };
 
@@ -497,7 +507,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     switch (cmdEvent)
                     {
                         case StandardOutputCommandEvent stdOut:
-                            _logger.LogDebug("{x}", stdOut.Text);
+                            _logger.LogTrace("{x}", stdOut.Text);
                             break;
                         case StandardErrorCommandEvent stdErr:
                             _logger.LogError("{x}", stdErr.Text);
@@ -510,17 +520,29 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                             }
                             else
                             {
-                                _logger.LogDebug("{x}", msg);
+                                _logger.LogTrace("{x}", msg);
                             }
                             break;
                     }
                 }
 
-                _logger.LogDebug("Vagrant replica {VagrantReplicaId} is running", replicaId);
+                var vmName = await GetVMName(replicaId, cancellationToken);
+
+                VagrantReplica updatedVagrantReplica = new()
+                {
+                    BuildId = buildId,
+                    Id = replicaId,
+                    Rev = rev,
+                    VMName = vmName,
+                    Labels = labels
+                };
+                await replicaFilePath.Write(updatedVagrantReplica, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
+
+                _logger.LogInformation("Vagrant replica {VagrantReplicaId} is running", replicaId);
             }
             catch (Exception ex)
             {
-                _logger.LogError("Error on running vagrant replica {VagrantReplicaId}: {Error}", replicaId, ex);
+                _logger.LogError("Error on starting vagrant replica {VagrantReplicaId}: {Error}", replicaId, ex);
                 throw;
             }
         }, cancellationToken);
@@ -567,7 +589,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         bool isLocked = false;
         var executeTask = Task.Run(async () =>
         {
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Execute),
@@ -578,7 +600,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
-                _logger.LogDebug("Executing a script on vagrant replica {VagrantReplicaId}", vagrantReplica.Id);
+                _logger.LogInformation("Executing a script on vagrant replica {VagrantReplicaId}", vagrantReplica.Id);
                 
                 while (!isLocked)
                 {
@@ -596,10 +618,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                         switch (cmdEvent)
                         {
                             case StandardOutputCommandEvent stdOut:
-                                _logger.LogDebug("{x}", stdOut.Text);
+                                _logger.LogTrace("{x}", stdOut.Text);
                                 break;
                             case StandardErrorCommandEvent stdErr:
-                                _logger.LogDebug("{x}", stdErr.Text);
+                                _logger.LogTrace("{x}", stdErr.Text);
                                 break;
                             case ExitedCommandEvent exited:
                                 var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
@@ -609,7 +631,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                                 }
                                 else
                                 {
-                                    _logger.LogDebug("{x}", msg);
+                                    _logger.LogTrace("{x}", msg);
                                 }
                                 break;
                         }
@@ -635,7 +657,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 await Task.WhenAny(tasks);
 
-                _logger.LogDebug("Script execution done on vagrant replica {VagrantReplicaId}", replicaId);
+                _logger.LogInformation("Script execution done on vagrant replica {VagrantReplicaId}", replicaId);
             }
             catch (Exception ex)
             {
@@ -681,6 +703,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             BuildId = vagrantReplica.BuildId,
             Id = vagrantReplica.Id,
             Rev = vagrantReplica.Rev,
+            VMName = vagrantReplica.VMName,
             State = vagrantReplicaState,
             Labels = vagrantReplica.Labels
         };
@@ -720,18 +743,20 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         await locker.Execute(id, async () =>
         {
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(DeleteReplica),
                 ["VagrantReplicaId"] = id
             });
 
-            _logger.LogDebug("Deleting vagrant replica {VagrantReplicaId}", id);
+            var replica = await GetReplica(id, cancellationToken);
+
+            _logger.LogInformation("Deleting vagrant replica {VagrantReplicaId}", id);
 
             try
             {
-                await DeleteCore(dir, id, cancellationToken);
+                await DeleteCore(dir, replica?.VMName, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -739,11 +764,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 throw;
             }
 
-            _logger.LogDebug("Deleted vagrant replica {VagrantReplicaId}", id);
+            _logger.LogInformation("Deleted vagrant replica {VagrantReplicaId}", id);
         });
     }
 
-    public async Task DeleteCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
+    public async Task DeleteCore(AbsolutePath dir, string? vmName, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -754,7 +779,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     break;
                 }
 
-                await DeleteVMCore(dir, id, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                await DeleteVMCore(dir, vmName, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
                 await dir.WaitKillExceptHyperv(cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
@@ -771,7 +796,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Error on deleting {}: {}. retrying...", id, ex.Message);
+                _logger.LogWarning("Error on deleting {}: {}. retrying...", dir.Name, ex.Message);
             }
         }
     }
@@ -783,7 +808,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             switch (cmdEvent)
             {
                 case StandardOutputCommandEvent stdOut:
-                    _logger.LogDebug("{x}", stdOut.Text);
+                    _logger.LogTrace("{x}", stdOut.Text);
                     break;
                 case StandardErrorCommandEvent stdErr:
                     _logger.LogError("{x}", stdErr.Text);
@@ -796,21 +821,26 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     }
                     else
                     {
-                        _logger.LogDebug("{x}", msg);
+                        _logger.LogTrace("{x}", msg);
                     }
                     break;
             }
         }
     }
 
-    public async Task DeleteVMCore(AbsolutePath dir, string id, CancellationToken cancellationToken)
+    public async Task DeleteVMCore(AbsolutePath dir, string? vmName, CancellationToken cancellationToken)
     {
+        var id = dir.Name;
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromSeconds(30));
-                var vmName = await GetVMName(id, ctxTimed);
+                if (string.IsNullOrEmpty(vmName))
+                {
+                    vmName = await GetVMName(id, ctxTimed);
+                }
                 if (!string.IsNullOrEmpty(vmName))
                 {
                     try

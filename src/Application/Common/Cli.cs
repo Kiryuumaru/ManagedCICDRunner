@@ -149,10 +149,10 @@ public static class Cli
             switch (cmdEvent)
             {
                 case StandardOutputCommandEvent stdOut:
-                    logger.LogDebug("{x}", stdOut.Text);
+                    logger.LogTrace("{x}", stdOut.Text);
                     break;
                 case StandardErrorCommandEvent stdErr:
-                    logger.LogDebug("{x}", stdErr.Text);
+                    logger.LogTrace("{x}", stdErr.Text);
                     break;
                 case ExitedCommandEvent exited:
                     var msg = $"{path} ended with return code {exited.ExitCode}";
@@ -162,7 +162,7 @@ public static class Cli
                     }
                     else
                     {
-                        logger.LogDebug("{x}", msg);
+                        logger.LogTrace("{x}", msg);
                     }
                     break;
             }
@@ -196,10 +196,10 @@ public static class Cli
             switch (cmdEvent)
             {
                 case StandardOutputCommandEvent stdOut:
-                    logger.LogDebug("{x}", stdOut.Text);
+                    logger.LogTrace("{x}", stdOut.Text);
                     break;
                 case StandardErrorCommandEvent stdErr:
-                    logger.LogDebug("{x}", stdErr.Text);
+                    logger.LogTrace("{x}", stdErr.Text);
                     if (errors != "")
                     {
                         errors += "\n";
@@ -214,7 +214,7 @@ public static class Cli
                     }
                     else
                     {
-                        logger.LogDebug("{x}", msg);
+                        logger.LogTrace("{x}", msg);
                     }
                     break;
             }

@@ -53,21 +53,20 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Verifying required features...");
         await WaitRequiredFeatures(stoppingToken);
 
         using var scope = _serviceProvider.CreateScope();
         var vagrantService = scope.ServiceProvider.GetRequiredService<VagrantService>();
 
-        _logger.LogInformation("Verifying vagrant client...");
         await vagrantService.VerifyClient(stoppingToken);
 
         _logger.LogInformation("Starting runner routine...");
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {msg}", ex.Message));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {Error}", ex));
     }
 
     private async Task WaitRequiredFeatures(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("Verifying required features...");
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -78,7 +77,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     _logger.LogDebug("Verifying feature {featureName} is enabled", feat);
                     if (!await WindowsOSHelpers.IsFeatureEnabled(feat, stoppingToken))
                     {
-                        _logger.LogError("{featureName} is not enabled", feat);
+                        _logger.LogError("{FeatureName} is not enabled", feat);
                         allEnabled = false;
                         break;
                     }
@@ -98,7 +97,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
     private async Task Routine(CancellationToken stoppingToken)
     {
-        using var logScope = _logger.BeginScope(new Dictionary<string, object>
+        using var logScope = _logger.BeginScopeMap(new ()
         {
             ["Service"] = nameof(RunnerWorker),
             ["RoutineGuid"] = Guid.NewGuid()
@@ -735,7 +734,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         {
                                             try
                                             {
-                                                _logger.LogInformation("Runner starting OS: {id}", replicaId);
+                                                _logger.LogInformation("Runner starting OS: {ReplicaId}", replicaId);
 
                                                 await vagrantService.Run(vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
                                             }
@@ -744,7 +743,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                                 throw new Exception($"Runner rev run error on {replicaId}: {ex.Message}");
                                             }
 
-                                            _logger.LogInformation("Runner created (up): {id}", replicaId);
+                                            _logger.LogInformation("Runner created (up): {ReplicaId}", replicaId);
 
                                             try
                                             {
@@ -757,7 +756,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         }
                                         catch (Exception ex)
                                         {
-                                            _logger.LogError("{ex}", ex.Message);
+                                            _logger.LogError("{Error}", ex);
                                         }
                                         finally
                                         {
@@ -769,7 +768,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError("Runner rev build error on {}: {ex}", replicaId, ex.Message);
+                                _logger.LogError("Runner rev build error on {ReplicaId}: {Error}", replicaId, ex);
                                 runnerRuntime.Runners.Remove(replicaId);
                             }
                             finally
@@ -781,7 +780,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError("Runner rev init error on {}: {ex}", replicaId, ex.Message);
+                        _logger.LogError("Runner rev init error on {ReplicaId}: {Error}", replicaId, ex);
                         runnerRuntime.Runners.Remove(replicaId);
                     }
                 }
@@ -806,7 +805,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 .Where(i => i.Value.Status == RunnerStatus.Busy)
                 .Count();
 
-            using var _ = _logger.BeginScope(new Dictionary<string, object>
+            using var _ = _logger.BeginScopeMap(new ()
             {
                 ["IsRunnerStatus"] = true
             });
