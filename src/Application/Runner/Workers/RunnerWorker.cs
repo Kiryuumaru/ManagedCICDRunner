@@ -817,7 +817,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         _logger.LogDebug("Runner routine end");
     }
 
-    private HttpRequestMessage ExecutePrepareMessage(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
+    private HttpRequestMessage ExecutePrepareMessage(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement)
     {
         HttpRequestMessage requestMessage = new(httpMethod, GetEndpoint(runnerTokenEntity, segement));
         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", runnerTokenEntity.GithubToken);
@@ -827,14 +827,14 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private async Task<HttpResult> Execute(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
     {
         using var httpClient = GetGithubHttpClient();
-        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement, cancellationToken);
+        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement);
         return await httpClient.Execute(requestMessage, cancellationToken: cancellationToken);
     }
 
     private async Task<HttpResult<T>> Execute<T>(HttpMethod httpMethod, RunnerTokenEntity runnerTokenEntity, string segement, CancellationToken cancellationToken)
     {
         using var httpClient = GetGithubHttpClient();
-        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement, cancellationToken);
+        var requestMessage = ExecutePrepareMessage(httpMethod, runnerTokenEntity, segement);
         return await httpClient.Execute<T>(requestMessage, cancellationToken: cancellationToken);
     }
 

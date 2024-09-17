@@ -528,17 +528,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         await locker.Execute([buildId, replicaId], async () =>
         {
             isLocked = true;
-            while (true)
+            while (await GetStateCore(replicaPath, cancellationToken) != VagrantReplicaState.Running && !runTask.IsCompleted)
             {
-                if (runTask.IsCompleted)
-                {
-                    break;
-                }
-                var replicaState = await GetStateCore(replicaPath, cancellationToken);
-                if (replicaState != VagrantReplicaState.NotCreated)
-                {
-                    break;
-                }
                 await Task.Delay(1000, cancellationToken);
             }
         });
@@ -927,7 +918,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             foreach (var prop in elements)
             {
-                if (prop!.GetProperty("Name").GetString()! is string name &&
+                if (prop!.GetProperty("Name").GetString() is string name &&
                     name.StartsWith(idStart, StringComparison.InvariantCultureIgnoreCase))
                 {
                     vmName = name;
