@@ -929,6 +929,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
     private async Task ResizeGuestVMStorage(AbsolutePath vagrantDir, string vmName, RunnerOSType runnerOS, int storageGB, CancellationToken cancellationToken)
     {
+        return;
+
         var currentVMState = await GetStateCore(vagrantDir, vmName, cancellationToken);
         if (currentVMState != VagrantReplicaState.Running)
         {
