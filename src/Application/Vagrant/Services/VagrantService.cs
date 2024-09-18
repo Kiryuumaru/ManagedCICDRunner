@@ -1001,9 +1001,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
-                    $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
-                    $SizeMin = $SizePart.SizeMin
-                    $SizeFinal = ($SizeTarget,$SizeMin | Measure -Max).Maximum
+                    $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes) / 1024 / 1024}
+                    $SizeFinal = ($SizeTarget,$SizePart.SizeMin | Measure -Max).Maximum
                     Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeFinal
                     """,
                 _ => throw new NotSupportedException()
