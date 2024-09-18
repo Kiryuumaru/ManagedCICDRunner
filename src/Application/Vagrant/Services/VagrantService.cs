@@ -465,6 +465,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 config.vm.provider "hyperv" do |hv|
                     hv.ip_address_timeout = 300
                     hv.enable_virtualization_extensions = true
+                    hv.linked_clone = true
                     hv.memory = "{1024 * memoryGB}"
                     hv.cpus = "{cpus}"
                 end
