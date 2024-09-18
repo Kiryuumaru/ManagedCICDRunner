@@ -664,24 +664,24 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         string inputScript;
                         if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Linux)
                         {
-                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                            inputScript = $"""
                                 export RUNNER_ALLOW_RUNASROOT=1
                                 cd "/r"
                                 sudo -E ./config.sh {inputArgs}
                                 sudo -E ./run.sh
                                 sudo shutdown -h now
-                                """);
+                                """;
                         }
                         else if (runnerRuntime.RunnerEntity.RunnerOS == RunnerOSType.Windows)
                         {
-                            inputScript = NormalizeScriptInput(runnerRuntime.RunnerEntity.RunnerOS, $"""
+                            inputScript = $"""
                                 $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                                 $env:RUNNER_ALLOW_RUNASROOT=1
                                 cd "C:\r"
                                 ./config.cmd {inputArgs}
                                 ./run.cmd
                                 shutdown /s /f
-                                """);
+                                """;
                         }
                         else
                         {
@@ -867,28 +867,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         else
         {
             throw new Exception("GithubOrg and GithubRepo is empty");
-        }
-    }
-
-    private static string NormalizeScriptInput(RunnerOSType runnerOS, string input)
-    {
-        if (runnerOS == RunnerOSType.Linux)
-        {
-            return input.Replace("\n\r", " && ")
-                .Replace("\r\n", " && ")
-                .Replace("\n", " && ")
-                .Replace("\"", "\\\"");
-        }
-        else if (runnerOS == RunnerOSType.Windows)
-        {
-            return input.Replace("\n\r", " ; ")
-                .Replace("\r\n", " ; ")
-                .Replace("\n", " ; ")
-                .Replace("\"", "\\\"");
-        }
-        else
-        {
-            throw new NotSupportedException();
         }
     }
 

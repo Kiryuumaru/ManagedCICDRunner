@@ -553,20 +553,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             return;
         }
 
-        string vmCommunicator;
-        if (vagrantBuild.RunnerOS == RunnerOSType.Linux)
-        {
-            vmCommunicator = "ssh";
-        }
-        else if (vagrantBuild.RunnerOS == RunnerOSType.Windows)
-        {
-            vmCommunicator = "ssh";
-        }
-        else
-        {
-            throw new NotSupportedException();
-        }
-
         bool isLocked = false;
         var executeTask = Task.Run(async () =>
         {
@@ -594,7 +580,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 tasks.Add(Task.Run(async () =>
                 {
-                    await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, [vmCommunicator, "-c", "\"" + await inputScriptFactory() + "\""], replicaPath, VagrantEnvVars, stoppingToken: ct))
+                    await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(vagrantBuild.RunnerOS, await inputScriptFactory())}\""], replicaPath, VagrantEnvVars, stoppingToken: ct))
                     {
                         switch (cmdEvent)
                         {
@@ -605,7 +591,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                                 _logger.LogTrace("{x}", stdErr.Text);
                                 break;
                             case ExitedCommandEvent exited:
-                                var msg = $"vagrant {vmCommunicator} ended with return code {exited.ExitCode}";
+                                var msg = $"vagrant ssh ended with return code {exited.ExitCode}";
                                 if (exited.ExitCode != 0)
                                 {
                                     throw new Exception(msg);
@@ -956,43 +942,67 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         if (newStorageBytes == currentVHDSizeBytes)
         {
-            _logger.LogDebug("Skipped {VagrantVHDPath} VHD resize.", vmHardDisk);
+            _logger.LogDebug("Skipped {VagrantVMName} VHD resize.", vmName);
             return;
         }
 
         bool isUpsize = false;
-        if (newStorageBytes > currentVHDSizeBytes)
+        long sizeChangeBytes = newStorageBytes - currentVHDSizeBytes;
+        if (sizeChangeBytes > 0)
         {
             isUpsize = true;
         }
 
-        _logger.LogDebug("Stopping VM {VagrantVMName} for VHD resizing", vmName);
-        await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \\\"{vmName}\\\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
-
         if (isUpsize)
         {
-            _logger.LogDebug("Upsizing VHD for {VagrantVMName} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+            _logger.LogDebug("Stopping VM {VagrantVMName} for VHD upsizing", vmName);
+            await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \\\"{vmName}\\\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+            _logger.LogDebug("Upsizing VM {VagrantVMName} VHD from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+            await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -SizeBytes \\\"{newStorageBytes}\\\""], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+            _logger.LogDebug("Starting VM {VagrantVMName} with resized VHD", vmName);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
+
+            _logger.LogDebug("Expanding VM {VagrantVMName} primary partition", vmName);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
+                RunnerOSType.Linux => $"""
+                    primaryPartition=$(grep -c 'sda[0-9]' /proc/partitions)
+                    growpart /dev/sda $primaryPartition
+                    pvresize /dev/sda$primaryPartition
+                    lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+                    resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+                    """,
+                RunnerOSType.Windows => $"""
+                    $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
+                    $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
+                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size ((Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition).SizeMax)
+                    """,
+                _ => throw new NotSupportedException()
+            })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
         }
         else
         {
-            _logger.LogDebug("Downsizing VHD for {VagrantVMName} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
-        }
-        await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -SizeBytes \\\"{newStorageBytes}\\\""], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+            _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
+                RunnerOSType.Linux => $"""
 
-        _logger.LogDebug("Starting VM {VagrantVMName} with resized VHD", vmName);
-        await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
+                    """,
+                RunnerOSType.Windows => $"""
+                    $ErrorActionPreference = "Stop"; $VerbosePreference = "Continue"; $ProgressPreference = "SilentlyContinue"
 
-        if (runnerOS == RunnerOSType.Linux)
-        {
+                    """,
+                _ => throw new NotSupportedException()
+            })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
 
-        }
-        else if (runnerOS == RunnerOSType.Windows)
-        {
+            _logger.LogDebug("Stopping VM {VagrantVMName} for VHD downsizing", vmName);
+            await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \\\"{vmName}\\\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
 
-        }
-        else
-        {
-            throw new NotSupportedException();
+            _logger.LogDebug("Downsizing VM {VagrantVMName} VHD from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+            await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -ToMinimumSize"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+            _logger.LogDebug("Starting VM {VagrantVMName} with resized VHD", vmName);
+            await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
         }
     }
 
@@ -1007,5 +1017,27 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         await publicKeyPath.WriteAllText(publicKey, cancellationToken);
         await WindowsOSHelpers.TakeOwnPermission(privateKeyPath, cancellationToken);
         await WindowsOSHelpers.TakeOwnPermission(publicKeyPath, cancellationToken);
+    }
+
+    private static string NormalizeScriptInput(RunnerOSType runnerOS, string input)
+    {
+        if (runnerOS == RunnerOSType.Linux)
+        {
+            return input.Replace("\n\r", " && ")
+                .Replace("\r\n", " && ")
+                .Replace("\n", " && ")
+                .Replace("\"", "\\\"");
+        }
+        else if (runnerOS == RunnerOSType.Windows)
+        {
+            return input.Replace("\n\r", " ; ")
+                .Replace("\r\n", " ; ")
+                .Replace("\n", " ; ")
+                .Replace("\"", "\\\"");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
     }
 }
