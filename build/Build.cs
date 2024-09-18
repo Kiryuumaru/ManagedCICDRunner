@@ -157,22 +157,19 @@ class Build : BaseNukeBuildHelpers
             });
         });
 
-    PublishEntry PublishManagedCICDRunner => _ => _
+    PublishEntry PublishAssets => _ => _
         .AppId("managed-cicd-runner")
-        .Matrix(osMatrix, (definitionOs, os) =>
+        .RunnerOS(RunnerOS.Ubuntu2204)
+        .ReleaseAsset(() =>
         {
-            var osPascal = Regex.Replace(os, @"\b\p{Ll}", match => match.Value.ToUpper());
-            definitionOs.RunnerOS(os switch
+            List<AbsolutePath> paths = [];
+            foreach (var os in osMatrix)
             {
-                "linux" => RunnerOS.Ubuntu2204,
-                "windows" => RunnerOS.Windows2022,
-                _ => throw new NotSupportedException()
-            });
-            definitionOs.Matrix(archMatrix, (definitionArch, arch) =>
-            {
-                definitionArch.WorkflowId($"publish_{os}_{arch}");
-                definitionArch.DisplayName($"[Publish] {osPascal}{arch.ToUpperInvariant()}");
-                definitionArch.ReleaseAsset(context => GetAssets(os, arch));
-            });
+                foreach (var arch in archMatrix)
+                {
+                    paths.AddRange(GetAssets(os, arch));
+                }
+            }
+            return [.. paths];
         });
 }
