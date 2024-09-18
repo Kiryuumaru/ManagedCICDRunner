@@ -1001,8 +1001,27 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
                     $SizeTarget = $SizePart.SizeMax - ${{Math.Abs(sizeChangeGB) * 1024 * 1024}}
-                    $SizeFinal = ($SizeTarget,$SizePart.SizeMin | Measure -Max).Maximum
-                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeFinal
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeTarget
                     """,
                 _ => throw new NotSupportedException()
             })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
