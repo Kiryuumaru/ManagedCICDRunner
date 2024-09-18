@@ -1000,7 +1000,37 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
                     $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
                     $SizeTarget = ($SizeTarget - ($SizeTarget % 1024))
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
+                    echo $SizeTarget
                     Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeTarget
                     """,
                 _ => throw new NotSupportedException()
