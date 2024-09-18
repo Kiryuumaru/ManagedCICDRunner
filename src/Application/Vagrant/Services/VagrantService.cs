@@ -991,23 +991,18 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
-            return;
-
-            _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition {SS}", vmName, Math.Abs(sizeChangeGB) * 1024 * 1024);
+            _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
 
                     """,
                 RunnerOSType.Windows => $$"""
-                    
-                    2024-09-18 18:29:27Z [DBG] Shrinking VM managed_runner-5zu3bl-g7sisk-fsw8jz-ikaixc_default_1726684151555_6307 primary partition 28991029248
-                    2024-09-18 18:29:27Z [DBG] Shrinking VM managed_runner-5zu3bl-x2caoo-47ochi-nglvra_default_1726684151302_29908 primary partition 115964116992
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
                     $SizeTarget = $SizePart.SizeMax - ${{Math.Abs(sizeChangeGB) * 1024 * 1024}}
                     $SizeFinal = ($SizeTarget,$SizePart.SizeMin | Measure -Max).Maximum
-                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size ${SizeFinal}GB
+                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeFinal
                     """,
                 _ => throw new NotSupportedException()
             })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
