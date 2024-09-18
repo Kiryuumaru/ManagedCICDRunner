@@ -953,7 +953,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         bool isUpsize = false;
         long sizeChangeBytes = newStorageBytes - currentVHDSizeBytes;
-        long sizeChangeGB = sizeChangeBytes / 1024 / 1024;
         if (sizeChangeBytes > 0)
         {
             isUpsize = true;
@@ -991,38 +990,17 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
-            return;
-
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
 
                     """,
-                RunnerOSType.Windows => $$"""
-                    $ErrorActionPreference = "Stop"; $VerbosePreference = "Continue"; $ProgressPreference = "SilentlyContinue"
+                RunnerOSType.Windows => $"""
+                    $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
-                    $SizeTarget = $SizePart.SizeMax - ${{Math.Abs(sizeChangeGB) * 1024 * 1024}}
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
+                    $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
+                    $SizeTarget = ($SizeTarget - ($SizeTarget % 1024))
                     Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeTarget
                     """,
                 _ => throw new NotSupportedException()
