@@ -147,7 +147,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         _logger.LogInformation("Vagrant client verified");
     }
 
-    public async Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, Func<Task<string>> provisionScriptFactory, CancellationToken cancellationToken)
+    public async Task<VagrantBuild> Build(RunnerOSType runnerOSType, string baseBuildId, string buildId, string rev, int? changeStorageGB, Func<Task<string>> provisionScriptFactory, CancellationToken cancellationToken)
     {
         AbsolutePath boxPath = BuildPath / buildId;
         AbsolutePath buildFilePath = boxPath / "build.json";
@@ -286,6 +286,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     throw new Exception($"VM {buildId} was not started");
                 }
                 _logger.LogDebug("VM {VagrantBuildVMName} was started", vmName);
+
+                if (changeStorageGB.HasValue)
+                {
+                    await ResizeGuestVMStorage(boxPath, vmName, runnerOSType, changeStorageGB.Value, cancellationToken);
+                }
 
                 _logger.LogDebug("Building vagrant build {VagrantBuildId}", buildId);
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provision", "--provider", "hyperv"], boxPath, VagrantEnvVars, stoppingToken: cancellationToken);

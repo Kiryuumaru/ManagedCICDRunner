@@ -702,7 +702,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     string baseRev;
                                     try
                                     {
-                                        var baseBuild = await vagrantService.Build(runnerOs, vagrantBox, baseVagrantBuildId, "base", () => Task.FromResult(provisionScriptFile), stoppingToken);
+                                        var baseBuild = await vagrantService.Build(runnerOs, vagrantBox, baseVagrantBuildId, "base", null, () => Task.FromResult(provisionScriptFile), stoppingToken);
                                         baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
                                     }
                                     catch
@@ -716,7 +716,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                     }
                                     try
                                     {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, () => Task.FromResult(bootstrapInputScript), stoppingToken);
+                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, null, () => Task.FromResult(bootstrapInputScript), stoppingToken);
                                     }
                                     catch
                                     {
