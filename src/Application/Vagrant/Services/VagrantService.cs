@@ -991,7 +991,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
-            _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
+            _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition {SS}", vmName, Math.Abs(sizeChangeGB) * 1024 * 1024);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
 
