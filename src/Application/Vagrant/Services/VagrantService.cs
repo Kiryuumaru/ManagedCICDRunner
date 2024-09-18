@@ -993,7 +993,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
-
+                    primaryPartition=$(grep -c 'sda[0-9]' /proc/partitions)
+                    sudo e2fsck -f /dev/ubuntu-vg/ubuntu-lv
+                    sudo resize2fs /dev/ubuntu-vg/ubuntu-lv 50G
+                    sudo lvreduce -L 50G /dev/ubuntu-vg/ubuntu-lv
+                    sudo resize2fs /dev/ubuntu-vg/ubuntu-lv
                     """,
                 RunnerOSType.Windows => $"""
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
