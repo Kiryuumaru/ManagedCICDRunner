@@ -990,6 +990,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
+            return;
+
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
@@ -1000,37 +1002,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
                     $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
                     $SizeTarget = ($SizeTarget - ($SizeTarget % 1024))
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
-                    echo $SizeTarget
+                    134657064448
+                    134657063936
                     Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeTarget
                     """,
                 _ => throw new NotSupportedException()
