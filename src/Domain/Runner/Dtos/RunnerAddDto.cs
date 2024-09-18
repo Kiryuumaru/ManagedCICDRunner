@@ -25,6 +25,8 @@ public class RunnerAddDto
 
     public required int MemoryGB { get; init; }
 
+    public required int StorageGB { get; init; }
+
     public string? Group { get; init; }
 
     public required string[] Labels { get; init; }

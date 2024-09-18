@@ -410,7 +410,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         });
     }
 
-    public async Task Run(string buildId, string replicaId, string rev, int cpus, int memoryGB, Dictionary<string, string> labels, CancellationToken cancellationToken)
+    public async Task Run(string buildId, string replicaId, string rev, int cpus, int memoryGB, int storageGB, Dictionary<string, string> labels, CancellationToken cancellationToken)
     {
         AbsolutePath replicaPath = ReplicaPath / replicaId;
         AbsolutePath vagrantfilePath = replicaPath / "Vagrantfile";
@@ -493,6 +493,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                         BuildId = buildId,
                         Id = replicaId,
                         Rev = rev,
+                        Cpus = cpus,
+                        MemoryGB = memoryGB,
+                        StorageGB = storageGB,
                         VMName = null,
                         Labels = labels
                     };
@@ -505,6 +508,13 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 vmName = await GetVMName(replicaId, cancellationToken);
 
+                if (string.IsNullOrEmpty(vmName))
+                {
+                    throw new Exception($"{vmName} was not started");
+                }
+
+                await ResizeGuestVMStorage(replicaPath, vmName, vagrantBuild.RunnerOS, storageGB, cancellationToken);
+
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provision", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
                 VagrantReplica updatedVagrantReplica = new()
@@ -512,6 +522,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     BuildId = buildId,
                     Id = replicaId,
                     Rev = rev,
+                    Cpus = cpus,
+                    MemoryGB = memoryGB,
+                    StorageGB = storageGB,
                     VMName = vmName,
                     Labels = labels
                 };
@@ -672,6 +685,9 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             Id = vagrantReplica.Id,
             Rev = vagrantReplica.Rev,
             VMName = vagrantReplica.VMName,
+            Cpus = vagrantReplica.Cpus,
+            MemoryGB = vagrantReplica.MemoryGB,
+            StorageGB = vagrantReplica.StorageGB,
             State = vagrantReplicaState,
             Labels = vagrantReplica.Labels
         };
@@ -919,6 +935,65 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         catch { }
         return vmName;
+    }
+
+    private async Task ResizeGuestVMStorage(AbsolutePath vagrantDir, string vmName, RunnerOSType runnerOS, int storageGB, CancellationToken cancellationToken)
+    {
+        var currentVMState = await GetStateCore(vagrantDir, vmName, cancellationToken);
+        if (currentVMState != VagrantReplicaState.Running)
+        {
+            throw new Exception($"Cannot resize storage for {vmName}, VM is not running");
+        }
+
+        var vmHardDisk = (vagrantDir / ".vagrant" / "machines" / "default" / "hyperv" / "Virtual Hard Disks").GetFiles("*.vhdx").FirstOrDefault() ??
+            throw new Exception($"{vmName} hard disk was not found");
+
+        var newStorageBytes = storageGB * 1024L * 1024L * 1024L;
+        var vmHardDiskInfoRaw = await Cli.RunOnce("powershell", [$"Get-VHD -Path \\\"{vmHardDisk}\\\" | ConvertTo-Json"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+        var vmHardDiskInfoJson = JsonSerializer.Deserialize<JsonDocument>(vmHardDiskInfoRaw)!;
+        var currentVHDSizeBytes = vmHardDiskInfoJson.RootElement.GetProperty("Size").GetInt64();
+        var currentVHDSizeGB = currentVHDSizeBytes / 1024.0 / 1024.0 / 1024.0;
+
+        if (newStorageBytes == currentVHDSizeBytes)
+        {
+            _logger.LogDebug("Skipped {VagrantVHDPath} VHD resize.", vmHardDisk);
+            return;
+        }
+
+        bool isUpsize = false;
+        if (newStorageBytes > currentVHDSizeBytes)
+        {
+            isUpsize = true;
+        }
+
+        _logger.LogDebug("Stopping VM {VagrantVMName} for VHD resizing", vmName);
+        await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \"{vmName}\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+        if (isUpsize)
+        {
+            _logger.LogDebug("Upsizing VHD for {VagrantVHDPath} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+        }
+        else
+        {
+            _logger.LogDebug("Downsizing VHD for {VagrantVHDPath} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+        }
+        await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -SizeBytes \\\"{newStorageBytes}\\\""], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+
+        _logger.LogDebug("Starting VM {VagrantVMName} with resized VHD", vmName);
+        await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
+
+        if (runnerOS == RunnerOSType.Linux)
+        {
+
+        }
+        else if (runnerOS == RunnerOSType.Windows)
+        {
+
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
     }
 
     private async Task GenerateSshKeys(string id, AbsolutePath path, CancellationToken cancellationToken)

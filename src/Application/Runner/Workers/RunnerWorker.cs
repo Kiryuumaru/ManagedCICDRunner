@@ -586,6 +586,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     string runnerId = runnerRuntime.RunnerEntity.Id;
                     int cpus = runnerRuntime.RunnerEntity.Cpus;
                     int memoryGB = runnerRuntime.RunnerEntity.MemoryGB;
+                    int storageGB = runnerRuntime.RunnerEntity.StorageGB;
                     RunnerOSType runnerOs = runnerRuntime.RunnerEntity.RunnerOS;
                     string runnerOsStr = runnerOs switch
                     {
@@ -736,7 +737,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                             {
                                                 _logger.LogInformation("Runner starting OS: {ReplicaId}", replicaId);
 
-                                                await vagrantService.Run(vagrantBuildId, replicaId, rev, cpus, memoryGB, labels, stoppingToken);
+                                                await vagrantService.Run(vagrantBuildId, replicaId, rev, cpus, memoryGB, storageGB, labels, stoppingToken);
                                             }
                                             catch (Exception ex)
                                             {

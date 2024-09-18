@@ -23,6 +23,8 @@ public class RunnerEditDto
 
     public int? NewMemoryGB { get; init; }
 
+    public int? NewStorageGB { get; init; }
+
     public string? NewGroup { get; init; }
 
     public string[]? NewLabels { get; init; }

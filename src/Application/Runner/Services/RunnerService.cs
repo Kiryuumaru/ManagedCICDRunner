@@ -160,6 +160,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             MaxReplicas = runnerAddDto.MaxReplicas,
             Cpus = runnerAddDto.Cpus,
             MemoryGB = runnerAddDto.MemoryGB,
+            StorageGB = runnerAddDto.StorageGB,
             Group = runnerAddDto.Group,
             Labels = runnerAddDto.Labels
         };
@@ -222,7 +223,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             Group = !string.IsNullOrEmpty(runnerEditDto.NewGroup) ? runnerEditDto.NewGroup : runner.Group,
             Labels = runnerEditDto.NewLabels ?? runner.Labels,
             Cpus = runnerEditDto.NewCpus ?? runner.Cpus,
-            MemoryGB = runnerEditDto.NewMemoryGB ?? runner.MemoryGB
+            MemoryGB = runnerEditDto.NewMemoryGB ?? runner.MemoryGB,
+            StorageGB = runnerEditDto.NewStorageGB ?? runner.StorageGB
         };
 
         if (newRunner.Labels.Length == 0 && newRunner.Labels.Any(i => i.Contains(' ')))
@@ -299,7 +301,8 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
                 Group = runner.Group,
                 Labels = runner.Labels,
                 Cpus = runner.Cpus,
-                MemoryGB = runner.MemoryGB
+                MemoryGB = runner.MemoryGB,
+                StorageGB = runner.StorageGB
             };
 
             if (!result.Success(await store.Set(id.ToLowerInvariant(), newRunner, cancellationToken: cancellationToken)))
