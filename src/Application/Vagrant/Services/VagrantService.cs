@@ -971,11 +971,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         if (isUpsize)
         {
-            _logger.LogDebug("Upsizing VHD for {VagrantVHDPath} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+            _logger.LogDebug("Upsizing VHD for {VagrantVMName} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
         }
         else
         {
-            _logger.LogDebug("Downsizing VHD for {VagrantVHDPath} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+            _logger.LogDebug("Downsizing VHD for {VagrantVMName} from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
         }
         await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -SizeBytes \\\"{newStorageBytes}\\\""], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
 
