@@ -968,10 +968,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
                     primaryPartition=$(grep -c 'sda[0-9]' /proc/partitions)
-                    growpart /dev/sda $primaryPartition
-                    pvresize /dev/sda$primaryPartition
-                    lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
-                    resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+                    sudo growpart /dev/sda $primaryPartition
+                    sudo pvresize /dev/sda$primaryPartition
+                    sudo lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+                    sudo resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
                     """,
                 RunnerOSType.Windows => $"""
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
