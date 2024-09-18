@@ -8,12 +8,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <Compile Remove="Logger\Enums\**" />
-	  <EmbeddedResource Remove="Logger\Enums\**" />
-	  <None Remove="Logger\Enums\**" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<ProjectReference Include="..\Domain\Domain.csproj" />
 	</ItemGroup>
 
