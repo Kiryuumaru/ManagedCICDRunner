@@ -1006,6 +1006,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     echo $SizePart.SizeMax
                     echo $SizePart.SizeMax
                     echo $SizePart.SizeMax
+                    echo "$SizePart.SizeMax minus ${Math.Abs(sizeChangeBytes)}"
                     $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
                     echo $SizeTarget
                     echo $SizeTarget
