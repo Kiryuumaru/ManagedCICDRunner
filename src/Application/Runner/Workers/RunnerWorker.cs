@@ -61,7 +61,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         await vagrantService.VerifyClient(stoppingToken);
 
         _logger.LogInformation("Starting runner routine...");
-        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {Error}", ex));
+        RoutineExecutor.Execute(TimeSpan.FromSeconds(5), false, stoppingToken, Routine, ex => _logger.LogError("Runner error: {ErrorMessage}", ex.Message));
     }
 
     private async Task WaitRequiredFeatures(CancellationToken stoppingToken)
@@ -89,7 +89,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to check required features: {Error}", ex);
+                _logger.LogError("Failed to check required features: {ErrorMessage}", ex.Message);
             }
             await Task.Delay(2000, stoppingToken);
         }
@@ -756,7 +756,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                         }
                                         catch (Exception ex)
                                         {
-                                            _logger.LogError("{Error}", ex);
+                                            _logger.LogError("{ErrorMessage}", ex.Message);
                                         }
                                         finally
                                         {
@@ -768,7 +768,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError("Runner rev build error on {ReplicaId}: {Error}", replicaId, ex);
+                                _logger.LogError("Runner rev build error on {ReplicaId}: {ErrorMessage}", replicaId, ex.Message);
                                 runnerRuntime.Runners.Remove(replicaId);
                             }
                             finally
@@ -780,7 +780,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError("Runner rev init error on {ReplicaId}: {Error}", replicaId, ex);
+                        _logger.LogError("Runner rev init error on {ReplicaId}: {ErrorMessage}", replicaId, ex.Message);
                         runnerRuntime.Runners.Remove(replicaId);
                     }
                 }

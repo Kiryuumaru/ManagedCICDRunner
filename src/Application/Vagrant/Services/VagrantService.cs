@@ -318,7 +318,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogError("Error on building vagrant build {VagrantBuildId}: {Error}", buildId, ex);
+                _logger.LogError("Error on building vagrant build {VagrantBuildId}: {ErrorMessage}", buildId, ex.Message);
                 throw;
             }
         });
@@ -469,10 +469,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             end
             """;
 
-        bool isLocked = false;
-        var runTask = Task.Run(async () => {
+        string? vmName = null;
 
-            using var _ = _logger.BeginScopeMap(new ()
+        await locker.Execute(replicaId, async () =>
+        {
+            using var _ = _logger.BeginScopeMap(new()
             {
                 ["Service"] = nameof(VagrantService),
                 ["VagrantAction"] = nameof(Run),
@@ -483,50 +484,28 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
-                _logger.LogInformation("Starting vagrant replica {VagrantReplicaId}", replicaId);
-
-                while (!isLocked)
+                await locker.Execute(buildId, async () =>
                 {
-                    await Task.Delay(500, cancellationToken);
-                }
+                    _logger.LogInformation("Starting vagrant replica {VagrantReplicaId}", replicaId);
 
-                VagrantReplica vagrantReplica = new()
-                {
-                    BuildId = buildId,
-                    Id = replicaId,
-                    Rev = rev,
-                    VMName = null,
-                    Labels = labels
-                };
-
-                await replicaFilePath.Write(vagrantReplica, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
-                await vagrantfilePath.WriteAllText(vagrantFile, cancellationToken: cancellationToken);
-
-                await foreach (var cmdEvent in Cli.RunListen(ClientExecPath, ["up", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken))
-                {
-                    switch (cmdEvent)
+                    VagrantReplica vagrantReplica = new()
                     {
-                        case StandardOutputCommandEvent stdOut:
-                            _logger.LogTrace("{x}", stdOut.Text);
-                            break;
-                        case StandardErrorCommandEvent stdErr:
-                            _logger.LogError("{x}", stdErr.Text);
-                            break;
-                        case ExitedCommandEvent exited:
-                            var msg = $"vagrant up ended with return code {exited.ExitCode}";
-                            if (exited.ExitCode != 0)
-                            {
-                                throw new Exception(msg);
-                            }
-                            else
-                            {
-                                _logger.LogTrace("{x}", msg);
-                            }
-                            break;
-                    }
-                }
+                        BuildId = buildId,
+                        Id = replicaId,
+                        Rev = rev,
+                        VMName = null,
+                        Labels = labels
+                    };
 
-                var vmName = await GetVMName(replicaId, cancellationToken);
+                    await replicaFilePath.Write(vagrantReplica, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
+                    await vagrantfilePath.WriteAllText(vagrantFile, cancellationToken: cancellationToken);
+
+                    await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken);
+                });
+
+                vmName = await GetVMName(replicaId, cancellationToken);
+
+                await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--provision", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken);
 
                 VagrantReplica updatedVagrantReplica = new()
                 {
@@ -542,21 +521,10 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogError("Error on starting vagrant replica {VagrantReplicaId}: {Error}", replicaId, ex);
+                _logger.LogError("Error on starting vagrant replica {VagrantReplicaId}: {ErrorMessage}", replicaId, ex.Message);
                 throw;
             }
-        }, cancellationToken);
-
-        await locker.Execute([buildId, replicaId], async () =>
-        {
-            isLocked = true;
-            while (await GetStateCore(replicaPath, cancellationToken) != VagrantReplicaState.Running && !runTask.IsCompleted)
-            {
-                await Task.Delay(1000, cancellationToken);
-            }
         });
-
-        await runTask;
     }
 
     public async Task Execute(string replicaId, Func<Task<string>> inputScriptFactory, CancellationToken cancellationToken)
@@ -645,7 +613,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 tasks.Add(Task.Run(async () =>
                 {
-                    while (!ct.IsCancellationRequested && await GetStateCore(replicaPath, cancellationToken) == VagrantReplicaState.Running)
+                    while (!ct.IsCancellationRequested && await GetStateCore(replicaPath, vagrantReplica.VMName, cancellationToken) == VagrantReplicaState.Running)
                     {
                         await Task.Delay(2000);
                     }
@@ -661,7 +629,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogError("Error on executing a script on vagrant replica {VagrantReplicaId}: {Error}", replicaId, ex);
+                _logger.LogError("Error on executing a script on vagrant replica {VagrantReplicaId}: {ErrorMessage}", replicaId, ex.Message);
                 throw;
             }
         }, cancellationToken);
@@ -696,7 +664,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             return null;
         }
 
-        VagrantReplicaState vagrantReplicaState = await GetStateCore(dir, cancellationToken);
+        VagrantReplicaState vagrantReplicaState = await GetStateCore(dir, vagrantReplica.VMName, cancellationToken);
 
         return new()
         {
@@ -760,7 +728,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogError("Error on deleting a vagrant replica {VagrantReplicaId}: {Error}", id, ex);
+                _logger.LogError("Error on deleting a vagrant replica {VagrantReplicaId}: {ErrorMessage}", id, ex.Message);
                 throw;
             }
 
@@ -796,7 +764,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Error on deleting {}: {}. retrying...", dir.Name, ex.Message);
+                _logger.LogWarning("Error on deleting {VagrantName}: {ErrorMessage}. retrying...", dir.Name, ex.Message);
             }
         }
     }
@@ -850,15 +818,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
-                        try
-                        {
-                            var result = await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
-                            if (result.Trim().Equals("off", StringComparison.InvariantCultureIgnoreCase))
-                            {
-                                break;
-                            }
-                        }
-                        catch
+                        var vmState = await GetStateCore(dir, vmName, ctxTimed);
+                        if (vmState == VagrantReplicaState.NotCreated || vmState == VagrantReplicaState.Off)
                         {
                             break;
                         }
@@ -870,11 +831,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     catch { }
                     while (!ctxTimed.IsCancellationRequested)
                     {
-                        try
-                        {
-                            await Cli.RunOnce("powershell", ["Get-VM", "-Name", vmName], environmentVariables: VagrantEnvVars, stoppingToken: ctxTimed);
-                        }
-                        catch
+                        var vmState = await GetStateCore(dir, vmName, ctxTimed);
+                        if (vmState == VagrantReplicaState.NotCreated)
                         {
                             break;
                         }
@@ -896,18 +854,21 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Error on deleting VM {VagrantId}: {Error}. retrying...", id, ex.Message);
+                _logger.LogWarning("Error on deleting VM {VagrantId}: {ErrorMessage}. retrying...", id, ex.Message);
             }
         }
     }
 
-    private async Task<VagrantReplicaState> GetStateCore(AbsolutePath vagrantDir, CancellationToken cancellationToken)
+    private async Task<VagrantReplicaState> GetStateCore(AbsolutePath vagrantDir, string? vmName, CancellationToken cancellationToken)
     {
         VagrantReplicaState vagrantReplicaState = VagrantReplicaState.NotCreated;
 
         try
         {
-            var vmName = await GetVMName(vagrantDir.Name, cancellationToken);
+            if (string.IsNullOrEmpty(vmName))
+            {
+                vmName = await GetVMName(vagrantDir.Name, cancellationToken);
+            }
             if (!string.IsNullOrEmpty(vmName))
             {
                 var vmState = (await Cli.RunOnce("powershell", [$"(Get-VM -Name \"{vmName}\").State"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken)).Trim();
