@@ -953,6 +953,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
         bool isUpsize = false;
         long sizeChangeBytes = newStorageBytes - currentVHDSizeBytes;
+        long sizeChangeGB = sizeChangeBytes / 1024 / 1024;
         if (sizeChangeBytes > 0)
         {
             isUpsize = true;
@@ -990,8 +991,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
-            return;
-
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
@@ -1001,8 +1000,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
                     $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
-                    $SizeTarget = ($SizePart.SizeMax / 1024 / 1024) - ${Math.Abs(sizeChangeBytes) / 1024 / 1024}
-                    $SizeFinal = ($SizeTarget,($SizePart.SizeMin / 1024 / 1024) | Measure -Max).Maximum
+                    $SizeTarget = $SizePart.SizeMax - ${{Math.Abs(sizeChangeGB) * 1024 * 1024}}
+                    $SizeFinal = ($SizeTarget,$SizePart.SizeMin | Measure -Max).Maximum
                     Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size ${SizeFinal}GB
                     """,
                 _ => throw new NotSupportedException()
