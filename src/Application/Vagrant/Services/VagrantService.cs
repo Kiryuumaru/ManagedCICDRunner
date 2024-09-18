@@ -981,23 +981,28 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 RunnerOSType.Windows => $"""
                     $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                     $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
-                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size ((Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition).SizeMax)
+                    $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
+                    $SizeMax = $SizePart.SizeMax
+                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeMax
                     """,
                 _ => throw new NotSupportedException()
             })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
         }
         else
         {
-            return;
-
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
 
                     """,
                 RunnerOSType.Windows => $"""
-                    $ErrorActionPreference = "Stop"; $VerbosePreference = "Continue"; $ProgressPreference = "SilentlyContinue"
-
+                    $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
+                    $PrimaryPartition = (Get-Partition -DiskNumber 0).Count
+                    $SizePart = Get-PartitionSupportedSize -DiskNumber 0 -PartitionNumber $PrimaryPartition
+                    $SizeTarget = $SizePart.SizeMax - ${Math.Abs(sizeChangeBytes)}
+                    $SizeMin = $SizePart.SizeMin
+                    $SizeFinal = ($SizeTarget,$SizeMin | Measure -Max).Maximum
+                    Resize-Partition -DiskNumber 0 -PartitionNumber $PrimaryPartition -Size $SizeFinal
                     """,
                 _ => throw new NotSupportedException()
             })}\""], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
@@ -1005,8 +1010,11 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             _logger.LogDebug("Stopping VM {VagrantVMName} for VHD downsizing", vmName);
             await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \\\"{vmName}\\\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
 
-            _logger.LogDebug("Downsizing VM {VagrantVMName} VHD from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
-            await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -ToMinimumSize"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+            if (runnerOS == RunnerOSType.Windows)
+            {
+                _logger.LogDebug("Downsizing VM {VagrantVMName} VHD from {OldStorageSizeGB} GB to {NewStorageSizeGB} GB", vmName, currentVHDSizeGB, storageGB);
+                await Cli.RunListenAndLog(_logger, "powershell", [$"Resize-VHD -Path \\\"{vmHardDisk}\\\" -ToMinimumSize"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+            }
 
             _logger.LogDebug("Starting VM {VagrantVMName} with resized VHD", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], vagrantDir, VagrantEnvVars, stoppingToken: cancellationToken);
