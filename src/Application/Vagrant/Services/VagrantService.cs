@@ -967,7 +967,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
 
         _logger.LogDebug("Stopping VM {VagrantVMName} for VHD resizing", vmName);
-        await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \"{vmName}\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
+        await Cli.RunListenAndLog(_logger, "powershell", [$"Stop-VM -Name \\\"{vmName}\\\" -TurnOff -Force"], environmentVariables: VagrantEnvVars, stoppingToken: cancellationToken);
 
         if (isUpsize)
         {
