@@ -929,8 +929,6 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
     private async Task ResizeGuestVMStorage(AbsolutePath vagrantDir, string vmName, RunnerOSType runnerOS, int storageGB, CancellationToken cancellationToken)
     {
-        return;
-
         var currentVMState = await GetStateCore(vagrantDir, vmName, cancellationToken);
         if (currentVMState != VagrantReplicaState.Running)
         {
@@ -989,6 +987,8 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
         else
         {
+            return;
+
             _logger.LogDebug("Shrinking VM {VagrantVMName} primary partition", vmName);
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
