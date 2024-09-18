@@ -76,51 +76,32 @@ public static class ConfigurationExtensions
         return _runtimeGuid.Value;
     }
 
-    private static bool? _makeFileLogs = null;
     public static bool GetMakeFileLogs(this IConfiguration configuration)
     {
-        if (_makeFileLogs == null)
-        {
-            var makeLogsStr = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_MAKE_LOGS", "no");
-            if (!makeLogsStr.Equals("svc", StringComparison.InvariantCultureIgnoreCase))
-            {
-                _makeFileLogs = false;
-            }
-            else
-            {
-                _makeFileLogs = true;
-            }
-        }
-        return _makeFileLogs.Value;
+        return configuration.GetVarRefValueOrDefault("NET_CONDUIT_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
+    }
+    public static void SetMakeFileLogs(this IConfiguration configuration, bool makeFileLogs)
+    {
+        configuration["NET_CONDUIT_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
     }
 
-    private static LogLevel? _loggerLevel = null;
     public static LogLevel GetLoggerLevel(this IConfiguration configuration)
     {
-        if (_loggerLevel == null)
-        {
-            var loggerLevel = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_LOGGER_LEVEL", LogLevel.Information.ToString());
-            _loggerLevel = Enum.Parse<LogLevel>(loggerLevel);
-        }
-        return _loggerLevel.Value;
+        var loggerLevel = configuration.GetVarRefValueOrDefault("NET_CONDUIT_LOGGER_LEVEL", LogLevel.Information.ToString());
+        return Enum.Parse<LogLevel>(loggerLevel);
+    }
+    public static void SetLoggerLevel(this IConfiguration configuration, LogLevel loggerLevel)
+    {
+        configuration["NET_CONDUIT_LOGGER_LEVEL"] = loggerLevel.ToString();
     }
 
-    private static AbsolutePath? _dataPath = null;
     public static AbsolutePath GetDataPath(this IConfiguration configuration)
     {
-        if (_dataPath == null)
-        {
-            var dataPath = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", null);
-            if (string.IsNullOrEmpty(dataPath))
-            {
-                //_dataPath = AbsolutePath.Create("C:\\ManagedCICDRunner") / ".data";
-                _dataPath = AbsolutePath.Create(Environment.CurrentDirectory) / ".data";
-            }
-            else
-            {
-                _dataPath = AbsolutePath.Create(dataPath);
-            }
-        }
-        return _dataPath;
+        //return configuration.GetVarRefValueOrDefault("NET_CONDUIT_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
+        return configuration.GetVarRefValueOrDefault("NET_CONDUIT_DATA_PATH", AbsolutePath.Create("C:\\NetConduit") / ".data");
+    }
+    public static void SetDataPath(this IConfiguration configuration, AbsolutePath dataPath)
+    {
+        configuration["NET_CONDUIT_DATA_PATH"] = dataPath;
     }
 }

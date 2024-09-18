@@ -12,6 +12,7 @@
 		<PackageReference Include="Serilog.Enrichers.Process" Version="3.0.0" />
 		<PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
 		<PackageReference Include="Serilog.Formatting.Compact.Reader" Version="4.0.0" />
+		<PackageReference Include="Serilog.Sinks.OpenTelemetry" Version="4.1.0" />
 	</ItemGroup>
 
 	<ItemGroup>

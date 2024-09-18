@@ -70,6 +70,17 @@ internal static class LoggerBuilder
                 restrictedToMinimumLevel: logEventLevel,
                 theme: Theme());
 
+        string? useOtlpExporterEndpoint = configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+        if (!string.IsNullOrWhiteSpace(useOtlpExporterEndpoint))
+        {
+            loggerConfiguration = loggerConfiguration
+                .WriteTo.OpenTelemetry(options =>
+                {
+                    options.Endpoint = useOtlpExporterEndpoint;
+                    options.ResourceAttributes.Add("service.name", "managed-cicd-runner");
+                });
+        }
+
         if (configuration.GetMakeFileLogs())
         {
             loggerConfiguration = loggerConfiguration

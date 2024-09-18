@@ -1,6 +1,7 @@
 using AbsolutePathHelpers;
 using Application;
 using Application.Common;
+using Application.Configuration.Extensions;
 using Application.Logger.Interfaces;
 using ApplicationBuilderHelpers;
 using CliWrap.EventStream;
@@ -22,7 +23,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-ApplicationHostBuilder<WebApplicationBuilder> appBuilder = ApplicationHost.FromBuilder(WebApplication.CreateBuilder(args))
+var appBuilder = ApplicationHost.FromBuilder(WebApplication.CreateBuilder(args))
     .Add<Presentation.Presentation>()
     .Add<SerilogInfrastructure>()
     .Add<SQLiteLocalStoreInfrastructure>();
@@ -46,7 +47,7 @@ return await parserResult
 
                 if (opts.AsService)
                 {
-                    appBuilder.Configuration["MANAGED_CICD_RUNNER_MAKE_LOGS"] = "svc";
+                    appBuilder.Configuration.SetMakeFileLogs(true);
                 }
 
                 await appBuilder.Build().Run(ct);
@@ -95,16 +96,17 @@ return await parserResult
 
 CancellationToken SetupCli(LogEventLevel logEventLevel)
 {
-    appBuilder.Configuration["MANAGED_CICD_RUNNER_LOGGER_LEVEL"] = logEventLevel switch
+    appBuilder.Configuration.SetLoggerLevel(logEventLevel switch
     {
-        LogEventLevel.Verbose => LogLevel.Trace.ToString(),
-        LogEventLevel.Debug => LogLevel.Debug.ToString(),
-        LogEventLevel.Information => LogLevel.Information.ToString(),
-        LogEventLevel.Warning => LogLevel.Warning.ToString(),
-        LogEventLevel.Error => LogLevel.Error.ToString(),
-        LogEventLevel.Fatal => LogLevel.Critical.ToString(),
+        LogEventLevel.Verbose => LogLevel.Trace,
+        LogEventLevel.Debug => LogLevel.Debug,
+        LogEventLevel.Information => LogLevel.Information,
+        LogEventLevel.Warning => LogLevel.Warning,
+        LogEventLevel.Error => LogLevel.Error,
+        LogEventLevel.Fatal => LogLevel.Critical,
         _ => throw new NotImplementedException(logEventLevel.ToString())
-    };
+    });
+
     CancellationTokenSource cts = new();
     Console.CancelKeyPress += (s, e) =>
     {

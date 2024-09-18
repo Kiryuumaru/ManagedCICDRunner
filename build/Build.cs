@@ -82,7 +82,7 @@ class Build : BaseNukeBuildHelpers
         return [.. assets];
     }
 
-    BuildEntry BuildEdgeGridBinaries => _ => _
+    BuildEntry BuildManagedCICDRunnerBinaries => _ => _
         .AppId("managed-cicd-runner")
         .Matrix(osMatrix, (definitionOs, os) =>
         {
@@ -98,7 +98,6 @@ class Build : BaseNukeBuildHelpers
                 string runtime = $"{os.ToLowerInvariant()}-{arch.ToLowerInvariant()}";
                 definitionArch.WorkflowId($"build_{os}_{arch}");
                 definitionArch.DisplayName($"[Build] {osPascal}{arch.ToUpperInvariant()}");
-                definitionArch.ReleaseAsset(context => GetAssets(os, arch));
                 definitionArch.Execute(async context =>
                 {
                     var outAsset = GetOutAsset(os, arch);
@@ -155,6 +154,25 @@ class Build : BaseNukeBuildHelpers
                             .Replace("{{$rootextract}}", $"ManagedCICDRunner_{os}_{arch}"));
                     }
                 });
+            });
+        });
+
+    PublishEntry PublishManagedCICDRunner => _ => _
+        .AppId("managed-cicd-runner")
+        .Matrix(osMatrix, (definitionOs, os) =>
+        {
+            var osPascal = Regex.Replace(os, @"\b\p{Ll}", match => match.Value.ToUpper());
+            definitionOs.RunnerOS(os switch
+            {
+                "linux" => RunnerOS.Ubuntu2204,
+                "windows" => RunnerOS.Windows2022,
+                _ => throw new NotSupportedException()
+            });
+            definitionOs.Matrix(archMatrix, (definitionArch, arch) =>
+            {
+                definitionArch.WorkflowId($"publish_{os}_{arch}");
+                definitionArch.DisplayName($"[Publish] {osPascal}{arch.ToUpperInvariant()}");
+                definitionArch.ReleaseAsset(context => GetAssets(os, arch));
             });
         });
 }
