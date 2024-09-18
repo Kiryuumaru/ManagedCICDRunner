@@ -78,30 +78,30 @@ public static class ConfigurationExtensions
 
     public static bool GetMakeFileLogs(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValueOrDefault("NET_CONDUIT_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
+        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
     }
     public static void SetMakeFileLogs(this IConfiguration configuration, bool makeFileLogs)
     {
-        configuration["NET_CONDUIT_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
+        configuration["MANAGED_CICD_RUNNER_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
     }
 
     public static LogLevel GetLoggerLevel(this IConfiguration configuration)
     {
-        var loggerLevel = configuration.GetVarRefValueOrDefault("NET_CONDUIT_LOGGER_LEVEL", LogLevel.Information.ToString());
+        var loggerLevel = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_LOGGER_LEVEL", LogLevel.Information.ToString());
         return Enum.Parse<LogLevel>(loggerLevel);
     }
     public static void SetLoggerLevel(this IConfiguration configuration, LogLevel loggerLevel)
     {
-        configuration["NET_CONDUIT_LOGGER_LEVEL"] = loggerLevel.ToString();
+        configuration["MANAGED_CICD_RUNNER_LOGGER_LEVEL"] = loggerLevel.ToString();
     }
 
     public static AbsolutePath GetDataPath(this IConfiguration configuration)
     {
-        //return configuration.GetVarRefValueOrDefault("NET_CONDUIT_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
-        return configuration.GetVarRefValueOrDefault("NET_CONDUIT_DATA_PATH", AbsolutePath.Create("C:\\NetConduit") / ".data");
+        //return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
+        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create("C:\\NetConduit") / ".data");
     }
     public static void SetDataPath(this IConfiguration configuration, AbsolutePath dataPath)
     {
-        configuration["NET_CONDUIT_DATA_PATH"] = dataPath;
+        configuration["MANAGED_CICD_RUNNER_DATA_PATH"] = dataPath;
     }
 }
