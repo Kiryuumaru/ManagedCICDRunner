@@ -994,6 +994,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             await Cli.RunListenAndLog(_logger, ClientExecPath, [$"ssh -c \"{NormalizeScriptInput(runnerOS, runnerOS switch {
                 RunnerOSType.Linux => $"""
                     primaryPartition=$(grep -c 'sda[0-9]' /proc/partitions)
+                    sudo e2fsck -f /dev/ubuntu-vg/ubuntu-lv
                     sudo resize2fs /dev/ubuntu-vg/ubuntu-lv {Math.Abs(sizeChangeBytes)}
                     sudo lvreduce -L {Math.Abs(sizeChangeBytes)} /dev/ubuntu-vg/ubuntu-lv
                     sudo resize2fs /dev/ubuntu-vg/ubuntu-lv
