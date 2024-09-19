@@ -35,7 +35,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (!result.SuccessAndHasValue(await store.GetIds(cancellationToken: cancellationToken), out string[]? runnerIds))
         {
-            _logger.LogError("Error runner GetAll: {}", result.Error);
+            _logger.LogError("Error runner GetAll: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -46,7 +46,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
         {
             if (!result.SuccessAndHasValue(await store.Get<RunnerEntity>(id.ToLowerInvariant(), cancellationToken: cancellationToken), out RunnerEntity? runner))
             {
-                _logger.LogError("Error runner GetAll: {}", result.Error);
+                _logger.LogError("Error runner GetAll: {Error}", result.Error);
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
@@ -74,7 +74,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (!result.Success(await store.Get<RunnerEntity>(id.ToLowerInvariant(), cancellationToken: cancellationToken), out RunnerEntity? runner))
         {
-            _logger.LogError("Error runner Get: {}", result.Error);
+            _logger.LogError("Error runner Get: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -169,7 +169,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (!result.Success(await store.Set(newRunner.Id, newRunner, cancellationToken: cancellationToken)))
         {
-            _logger.LogError("Error runner Create: {}", result.Error);
+            _logger.LogError("Error runner Create: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -177,7 +177,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
         result.WithValue(newRunner);
         result.WithStatusCode(HttpStatusCode.OK);
 
-        _logger.LogInformation("Runner id {} was created", newRunner.Id);
+        _logger.LogInformation("Runner id {RunnerId} was created", newRunner.Id);
 
         return result;
     }
@@ -197,7 +197,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (!result.Success(await store.Get<RunnerEntity>(id.ToLowerInvariant(), cancellationToken: cancellationToken), false, out RunnerEntity? runner))
         {
-            _logger.LogError("Error runner Edit: {}", result.Error);
+            _logger.LogError("Error runner Edit: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -251,7 +251,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
         result.WithValue(newRunner);
         result.WithStatusCode(HttpStatusCode.OK);
 
-        _logger.LogInformation("Runner id {} was edited", newRunner.Id);
+        _logger.LogInformation("Runner id {RunnerId} was edited", newRunner.Id);
 
         return result;
     }
@@ -271,7 +271,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
         if (!result.Success(await store.Get<RunnerEntity>(id.ToLowerInvariant(), cancellationToken: cancellationToken), false, out RunnerEntity? runner))
         {
-            _logger.LogError("Error runner Delete: {}", result.Error);
+            _logger.LogError("Error runner Delete: {Error}", result.Error);
             result.WithStatusCode(HttpStatusCode.InternalServerError);
             return result;
         }
@@ -307,7 +307,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
 
             if (!result.Success(await store.Set(id.ToLowerInvariant(), newRunner, cancellationToken: cancellationToken)))
             {
-                _logger.LogError("Error runner Delete: {}", result.Error);
+                _logger.LogError("Error runner Delete: {Error}", result.Error);
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
@@ -315,13 +315,13 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             result.WithValue(newRunner);
             result.WithStatusCode(HttpStatusCode.OK);
 
-            _logger.LogInformation("Runner id {} was mark deleted", newRunner.Id);
+            _logger.LogInformation("Runner id {RunnerId} was mark deleted", newRunner.Id);
         }
         else
         {
             if (!result.Success(await store.Delete(id.ToLowerInvariant(), cancellationToken: cancellationToken)))
             {
-                _logger.LogError("Error runner Delete: {}", result.Error);
+                _logger.LogError("Error runner Delete: {Error}", result.Error);
                 result.WithStatusCode(HttpStatusCode.InternalServerError);
                 return result;
             }
@@ -329,7 +329,7 @@ public class RunnerService(ILogger<RunnerService> logger, IServiceProvider servi
             result.WithValue(runner);
             result.WithStatusCode(HttpStatusCode.OK);
 
-            _logger.LogInformation("Runner id {} was deleted", id);
+            _logger.LogInformation("Runner id {RunnerId} was deleted", id);
         }
 
         return result;
