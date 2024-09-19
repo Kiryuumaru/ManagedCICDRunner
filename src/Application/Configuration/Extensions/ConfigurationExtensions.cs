@@ -98,7 +98,7 @@ public static class ConfigurationExtensions
     public static AbsolutePath GetDataPath(this IConfiguration configuration)
     {
         //return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
-        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create("C:\\NetConduit") / ".data");
+        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create("C:\\ManagedCICDRunner") / ".data");
     }
     public static void SetDataPath(this IConfiguration configuration, AbsolutePath dataPath)
     {
