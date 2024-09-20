@@ -44,6 +44,7 @@ curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg -
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y git gh
+git config --global http.version HTTP/1.1
 git config --global core.packedGitLimit 512m
 git config --global core.packedGitWindowSize 512m
 git config --global pack.deltaCacheSize 2047m
