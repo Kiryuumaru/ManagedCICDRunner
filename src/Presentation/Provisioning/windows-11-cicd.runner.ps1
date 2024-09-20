@@ -13,7 +13,6 @@ if ((Get-FileHash "${env:TEMP}\\mingit.zip" -Algorithm sha256).Hash -ne $GIT_SHA
 };
 Expand-Archive "${env:TEMP}\\mingit.zip" -DestinationPath "$GIT_HOME" -Force;
 $env:PATH = $env:PATH + ";$GIT_HOME\\cmd\\;$GIT_HOME\\cmd";
-& "$GIT_HOME\\cmd\\git.exe" config --global http.version HTTP/1.1
 & "$GIT_HOME\\cmd\\git.exe" config --global core.packedGitLimit 512m
 & "$GIT_HOME\\cmd\\git.exe" config --global core.packedGitWindowSize 512m
 & "$GIT_HOME\\cmd\\git.exe" config --global pack.deltaCacheSize 2047m
