@@ -13,8 +13,13 @@ if ((Get-FileHash "${env:TEMP}\\mingit.zip" -Algorithm sha256).Hash -ne $GIT_SHA
 };
 Expand-Archive "${env:TEMP}\\mingit.zip" -DestinationPath "$GIT_HOME" -Force;
 $env:PATH = $env:PATH + ";$GIT_HOME\\cmd\\;$GIT_HOME\\cmd";
+& "$GIT_HOME\\cmd\\git.exe" config --global core.packedGitLimit 512m
+& "$GIT_HOME\\cmd\\git.exe" config --global core.packedGitWindowSize 512m
+& "$GIT_HOME\\cmd\\git.exe" config --global pack.deltaCacheSize 2047m
+& "$GIT_HOME\\cmd\\git.exe" config --global pack.packSizeLimit 2047m
+& "$GIT_HOME\\cmd\\git.exe" config --global pack.windowMemory 2047m
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-    
+
 # Install gh-cli
 $GH_VERSION = "2.54.0"
 $GH_HOME = "C:\\Program Files\\Gh"
