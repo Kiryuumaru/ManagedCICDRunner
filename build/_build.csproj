@@ -13,7 +13,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="NukeBuildHelpers" Version="6.0.1" />
+		<PackageReference Include="NukeBuildHelpers" Version="6.0.2" />
 	</ItemGroup>
 
 </Project>
