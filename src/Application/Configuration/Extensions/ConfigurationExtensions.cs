@@ -63,7 +63,7 @@ public static class ConfigurationExtensions
     {
         if (_runtimeGuid == null)
         {
-            var runtimeGuidStr = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_RUNTIME_GUID", null);
+            var runtimeGuidStr = configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNNER_RUNTIME_GUID", null);
             if (string.IsNullOrEmpty(runtimeGuidStr))
             {
                 _runtimeGuid = Guid.NewGuid();
@@ -78,30 +78,30 @@ public static class ConfigurationExtensions
 
     public static bool GetMakeFileLogs(this IConfiguration configuration)
     {
-        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
+        return configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNNER_MAKE_LOGS", "no").Equals("yes", StringComparison.InvariantCultureIgnoreCase);
     }
     public static void SetMakeFileLogs(this IConfiguration configuration, bool makeFileLogs)
     {
-        configuration["MANAGED_CICD_RUNNER_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
+        configuration[$"{Defaults.AppNameUpperSnakeCase}_RUNNER_MAKE_LOGS"] = makeFileLogs ? "yes" : "no";
     }
 
     public static LogLevel GetLoggerLevel(this IConfiguration configuration)
     {
-        var loggerLevel = configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_LOGGER_LEVEL", LogLevel.Information.ToString());
+        var loggerLevel = configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNNER_LOGGER_LEVEL", LogLevel.Information.ToString());
         return Enum.Parse<LogLevel>(loggerLevel);
     }
     public static void SetLoggerLevel(this IConfiguration configuration, LogLevel loggerLevel)
     {
-        configuration["MANAGED_CICD_RUNNER_LOGGER_LEVEL"] = loggerLevel.ToString();
+        configuration[$"{Defaults.AppNameUpperSnakeCase}_RUNNER_LOGGER_LEVEL"] = loggerLevel.ToString();
     }
 
     public static AbsolutePath GetDataPath(this IConfiguration configuration)
     {
-        //return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
-        return configuration.GetVarRefValueOrDefault("MANAGED_CICD_RUNNER_DATA_PATH", AbsolutePath.Create("C:\\ManagedCICDRunner") / ".data");
+        //return configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNNER_DATA_PATH", AbsolutePath.Create(Environment.CurrentDirectory) / ".data");
+        return configuration.GetVarRefValueOrDefault($"{Defaults.AppNameUpperSnakeCase}_RUNNER_DATA_PATH", AbsolutePath.Create($"C:\\{Defaults.AppNamePascalCase}") / ".data");
     }
     public static void SetDataPath(this IConfiguration configuration, AbsolutePath dataPath)
     {
-        configuration["MANAGED_CICD_RUNNER_DATA_PATH"] = dataPath;
+        configuration[$"{Defaults.AppNameUpperSnakeCase}_RUNNER_DATA_PATH"] = dataPath;
     }
 }

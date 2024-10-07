@@ -26,7 +26,7 @@ internal class Presentation : Application.Application
 
         services.AddHttpClient(Options.DefaultName, client =>
         {
-            client.DefaultRequestHeaders.Add("User-Agent", "ManagedCICDRunner");
+            client.DefaultRequestHeaders.Add("User-Agent", Defaults.AppNamePascalCase);
         });
 
         services.AddMvc();
