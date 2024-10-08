@@ -173,8 +173,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
             cacheServerReplica = await vagrantService.ResumeReplica(cacheServerReplicaId, stoppingToken);
         }
-        if (string.IsNullOrEmpty(cacheServerIPAddress) ||
-            cacheServerReplica.IPAddress != cacheServerIPAddress)
+        if (string.IsNullOrEmpty(cacheServerIPAddress) || cacheServerReplica.IPAddress != cacheServerIPAddress)
         {
             if (!IPAddress.TryParse(cacheServerReplica.IPAddress, out _))
             {

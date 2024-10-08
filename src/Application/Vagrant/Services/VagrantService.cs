@@ -255,7 +255,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 if (boxPath.DirectoryExists())
                 {
-                    await DeleteCore(boxPath, null, cancellationToken);
+                    await DeleteCore(boxPath, cancellationToken);
                 }
 
                 using var _ = _logger.BeginScopeMap(new()
@@ -318,7 +318,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     }
 
                     _logger.LogDebug("Cleaning vagrant build {VagrantBuildId}", buildId);
-                    await DeleteVMCore(boxPath, vmName, cancellationToken);
+                    await DeleteVMCore(boxPath, cancellationToken);
 
                     await buildFilePath.Write(newVagrantBuild, JsonSerializerExtension.CamelCaseOption, cancellationToken: cancellationToken);
 
@@ -415,7 +415,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
-                await DeleteCore(boxPath, null, cancellationToken);
+                await DeleteCore(boxPath, cancellationToken);
             }
             catch { }
             try
@@ -442,7 +442,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             {
                 throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica already exists");
             }
-            await DeleteCore(replicaPath, replica?.VMName, cancellationToken);
+            await DeleteCore(replicaPath, cancellationToken);
         }
 
         var vagrantBuild = await GetBuild(buildId, cancellationToken) ??
@@ -840,7 +840,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
             try
             {
-                await DeleteCore(dir, replica?.VMName, cancellationToken);
+                await DeleteCore(dir, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -852,7 +852,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         });
     }
 
-    public async Task DeleteCore(AbsolutePath dir, string? vmName, CancellationToken cancellationToken)
+    public async Task DeleteCore(AbsolutePath dir, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -863,7 +863,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     break;
                 }
 
-                await DeleteVMCore(dir, vmName, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
+                await DeleteVMCore(dir, cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
                 await dir.WaitKillExceptHyperv(cancellationToken.WithTimeout(TimeSpan.FromMinutes(2)));
 
@@ -912,7 +912,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         }
     }
 
-    public async Task DeleteVMCore(AbsolutePath dir, string? vmName, CancellationToken cancellationToken)
+    public async Task DeleteVMCore(AbsolutePath dir, CancellationToken cancellationToken)
     {
         var id = dir.Name;
 
@@ -921,10 +921,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             try
             {
                 var ctxTimed = cancellationToken.WithTimeout(TimeSpan.FromSeconds(30));
-                if (string.IsNullOrEmpty(vmName))
-                {
-                    vmName = await GetVMName(id, ctxTimed);
-                }
+                var vmName = await GetVMName(id, ctxTimed);
                 if (!string.IsNullOrEmpty(vmName))
                 {
                     try
