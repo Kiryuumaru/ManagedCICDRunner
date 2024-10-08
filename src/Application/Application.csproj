@@ -13,7 +13,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="AbsolutePathHelpers" Version="0.1.31" />
-		<PackageReference Include="DisposableHelpers" Version="1.2.39" />
+		<PackageReference Include="DisposableHelpers" Version="1.2.40" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.19" />
