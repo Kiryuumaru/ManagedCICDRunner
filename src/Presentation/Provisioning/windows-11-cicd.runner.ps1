@@ -54,7 +54,7 @@ $DOCKER_DAEMON_SETTINGS | ConvertTo-Json | Out-File -FilePath (Join-Path $DOCKER
 & "$DOCKER_HOME\\dockerd.exe" --register-service --service-name docker
 $env:PATH = $env:PATH + ";$DOCKER_HOME\\;$DOCKER_HOME";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-    
+
 # Install az-cli
 $AZCLI_VERSION = 2.51.0
 Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
@@ -64,7 +64,7 @@ if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_S
     exit 1;
 };
 Start-Process msiexec.exe -NoNewWindow -Wait -ArgumentList '/i', "${env:TEMP}\\az-cli.msi", '/quiet', '/norestart'
-    
+
 # Install Visual Studio
 Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${env:TEMP}\\vs_community.exe" -UseBasicParsing;
 & "${env:TEMP}\\vs_community.exe" --quiet --wait --norestart --noUpdateInstaller --includeRecommended `
@@ -82,7 +82,7 @@ Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${en
     --add Microsoft.VisualStudio.Workload.Universal `
     --add Microsoft.VisualStudio.Workload.VisualStudioExtension `
     | Out-Default
-      
+
 # Install 7zip
 $_7ZIP_VERSION = "2408"
 $_7ZIP_DIR = "C:\\Program Files\\7-Zip"
@@ -95,7 +95,7 @@ if ((Get-FileHash "${env:TEMP}\\7z-x64.exe" -Algorithm sha256).Hash -ne $_7ZIP_S
 Start-Process "$env:TEMP\\7z-x64.exe" -Wait -ArgumentList @('/S', "/D=`"$_7ZIP_DIR`"")
 $env:PATH = $env:PATH + ";$_7ZIP_DIR\\;$_7ZIP_DIR";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-    
+
 # Install Miniconda
 $MINICONDA_RELEASE = "py312_24.5.0-0"
 $MINICONDA_DIR = "C:\\Program Files\\miniconda3"

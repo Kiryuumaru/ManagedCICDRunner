@@ -50,6 +50,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private const string GithubRunnerLinuxSHA256 = "3f6efb7488a183e291fc2c62876e14c9ee732864173734facc85a1bfb1744464";
     private const string GithubRunnerWindowsSHA256 = "1c78c51d20b817fb639e0b0ab564cf0469d083ad543ca3d0d7a2cdad5723f3a7";
 
+    private string? cacheServerIPAddress = null;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await WaitRequiredFeatures(stoppingToken);
@@ -102,6 +104,8 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             ["RoutineGuid"] = Guid.NewGuid()
         });
 
+        _logger.LogDebug("Runner routine start...");
+
         using var scope = _serviceProvider.CreateScope();
         var runnerService = scope.ServiceProvider.GetRequiredService<RunnerService>();
         var runnerTokenService = scope.ServiceProvider.GetRequiredService<RunnerTokenService>();
@@ -109,13 +113,94 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         var localStore = scope.ServiceProvider.GetRequiredService<LocalStoreService>();
         var runnerRuntimeHolder = scope.ServiceProvider.GetSingletonObjectHolder<Dictionary<string, RunnerRuntime>>();
 
-        _logger.LogDebug("Runner routine start...");
+        _logger.LogDebug("Checking controller ID...");
         string? runnerControllerId = (await localStore.Get<string>("runner_controller_id", cancellationToken: stoppingToken)).Value;
         if (string.IsNullOrEmpty(runnerControllerId))
         {
-            _logger.LogDebug("Setting controller id");
+            _logger.LogInformation("Setting controller ID...");
             runnerControllerId = StringHelpers.Random(6, false).ToLowerInvariant();
             (await localStore.Set("runner_controller_id", runnerControllerId, cancellationToken: stoppingToken)).ThrowIfError();
+        }
+
+        _logger.LogDebug("Checking cache server...");
+        var cacheServerBuildId = $"{RunnerIdentifier}-{runnerControllerId}-cache_server-base";
+        var cacheServerBuild = await vagrantService.GetBuild(cacheServerBuildId, stoppingToken);
+        if (cacheServerBuild == null)
+        {
+            _logger.LogInformation("Building cache server base...");
+            string provisionCacheServerScriptFile = """
+                apt-get update
+                DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                    apt-transport-https \
+                    sudo \
+                    ca-certificates \
+                    libssl3 \
+                    gnupg \
+                    lsb-release \
+                    zip \
+                    unzip \
+                    tar \
+                    bzip2 \
+                    p7zip-full \
+                    curl \
+                    gpg \
+                    apt-utils \
+                    software-properties-common
+                rm -rf /var/lib/apt/lists/*
+                                
+                # Install Docker
+                DOCKER_VERSION=5:27.1.1
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                apt-get update
+                apt-get install -y docker-ce=$DOCKER_VERSION-1~$(lsb_release -is).$(lsb_release -rs)~$(lsb_release -cs)
+                rm -rf /var/lib/apt/lists/*
+                """;
+            cacheServerBuild = await vagrantService.Build(RunnerOSType.Linux, "generic/ubuntu2204", cacheServerBuildId, "base", null, () => Task.FromResult(provisionCacheServerScriptFile), stoppingToken);
+        }
+        var cacheServerReplicaId = $"{RunnerIdentifier}-{runnerControllerId}-cache_server";
+        var cacheServerReplica = await vagrantService.GetReplica(cacheServerReplicaId, stoppingToken);
+        if (cacheServerReplica == null ||
+            cacheServerReplica.State == VagrantReplicaState.NotCreated)
+        {
+            _logger.LogInformation("Creating cache server OS replica...");
+            string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
+            cacheServerReplica = await vagrantService.CreateReplica(cacheServerBuildId, cacheServerReplicaId, baseRev, 2, 4, 1000, [], stoppingToken);
+        }
+        if (cacheServerReplica.State == VagrantReplicaState.Off)
+        {
+            _logger.LogInformation("Running cache server OS replica...");
+            string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
+            cacheServerReplica = await vagrantService.ResumeReplica(cacheServerReplicaId, stoppingToken);
+        }
+        if (string.IsNullOrEmpty(cacheServerIPAddress) ||
+            cacheServerReplica.IPAddress != cacheServerIPAddress)
+        {
+            if (!IPAddress.TryParse(cacheServerReplica.IPAddress, out _))
+            {
+                throw new Exception("Cache server IP address was not resolved");
+            }
+            cacheServerIPAddress = cacheServerReplica.IPAddress;
+        }
+        try
+        {
+            using var httpClient = _serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient();
+            (await httpClient.Execute(HttpMethod.Get, $"http://{cacheServerIPAddress}:3000", cancellationToken: stoppingToken)).ThrowIfError();
+        }
+        catch
+        {
+            _logger.LogInformation("Starting cache server API...");
+            string cacheServerInputScript = 
+                "sudo docker rm -f \"cache-server\" && " +
+                "sudo docker run " +
+                $"--name \"cache-server\" -d --rm --network=host " +
+                $"--cpus=2 --memory=4g " +
+                $"-e \"URL_ACCESS_TOKEN={runnerControllerId}\" " +
+                $"-e \"API_BASE_URL=http://{cacheServerIPAddress}:3000\" " +
+                $"-v \"cache-server-data:/app/.data\" " +
+                $"-p \"3000:3000\" " +
+                $"ghcr.io/falcondev-oss/github-actions-cache-server:latest";
+            await vagrantService.Execute(cacheServerReplicaId, () => Task.FromResult(cacheServerInputScript), stoppingToken);
         }
 
         _logger.LogDebug("Fetching runner token entities from service...");
@@ -236,6 +321,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             {
                 continue;
             }
+            if (vagrantReplica.Id == cacheServerReplicaId)
+            {
+                continue;
+            }
             var runnerId = vagrantReplica.Labels["runnerId"];
             if (!runnerRuntimeMap.TryGetValue(runnerId, out var runnerRuntime))
             {
@@ -350,6 +439,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         Dictionary<string, (RunnerAction RunnerAction, RunnerTokenEntity RunnerTokenEntity)> runnerActionsToRemove = [];
         foreach (var vagrantReplicaPair in vagrantReplicas)
         {
+            if (vagrantReplicaPair.Value?.Id == cacheServerReplicaId)
+            {
+                continue;
+            }
             if (vagrantReplicaPair.Value == null)
             {
                 vagrantReplicaToRemove[vagrantReplicaPair.Key] = null;
@@ -514,6 +607,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         List<Task> deleteDanglingBuildsTasks = [];
         foreach (var vagrantBuildPair in await vagrantService.GetBuilds(stoppingToken))
         {
+            if (vagrantBuildPair.Value?.Id == cacheServerBuildId)
+            {
+                continue;
+            }
             deleteDanglingBuildsTasks.Add(Task.Run(async () =>
             {
                 string id = vagrantBuildPair.Value?.Id ?? vagrantBuildPair.Key;
@@ -698,34 +795,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                 buildingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
                                 await executorLocker.Execute(vagrantBuildId, async () =>
                                 {
-                                    string baseRev;
-                                    try
-                                    {
-                                        var baseBuild = await vagrantService.Build(runnerOs, vagrantBox, baseVagrantBuildId, "base", null, () => Task.FromResult(provisionScriptFile), stoppingToken);
-                                        baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
-                                    }
-                                    catch
-                                    {
-                                        try
-                                        {
-                                            await vagrantService.DeleteBuild(baseVagrantBuildId, stoppingToken);
-                                        }
-                                        catch { }
-                                        throw;
-                                    }
-                                    try
-                                    {
-                                        await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, null, () => Task.FromResult(bootstrapInputScript), stoppingToken);
-                                    }
-                                    catch
-                                    {
-                                        try
-                                        {
-                                            await vagrantService.DeleteBuild(vagrantBuildId, stoppingToken);
-                                        }
-                                        catch { }
-                                        throw;
-                                    }
+                                    var baseBuild = await vagrantService.Build(runnerOs, vagrantBox, baseVagrantBuildId, "base", null, () => Task.FromResult(provisionScriptFile), stoppingToken);
+                                    string baseRev = $"{baseBuild.VagrantFileHash}-base_hash";
+                                    await vagrantService.Build(runnerOs, baseVagrantBuildId, vagrantBuildId, baseRev, null, () => Task.FromResult(bootstrapInputScript), stoppingToken);
 
                                     executingReplicaMap[replicaId] = runnerRuntime.Runners[replicaId];
                                     async void execute()
@@ -736,7 +808,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                                             {
                                                 _logger.LogInformation("Runner starting OS: {ReplicaId}", replicaId);
 
-                                                await vagrantService.Run(vagrantBuildId, replicaId, rev, cpus, memoryGB, storageGB, labels, stoppingToken);
+                                                await vagrantService.CreateReplica(vagrantBuildId, replicaId, rev, cpus, memoryGB, storageGB, labels, stoppingToken);
                                             }
                                             catch (Exception ex)
                                             {
@@ -747,7 +819,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
                                             try
                                             {
-                                                await vagrantService.Execute(replicaId, runnerInputScriptFactory, stoppingToken);
+                                                await vagrantService.ExecuteAndForget(replicaId, runnerInputScriptFactory, stoppingToken);
                                             }
                                             catch (Exception ex)
                                             {

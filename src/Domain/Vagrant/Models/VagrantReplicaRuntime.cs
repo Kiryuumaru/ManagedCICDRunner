@@ -9,5 +9,7 @@ namespace Domain.Vagrant.Models;
 
 public class VagrantReplicaRuntime : VagrantReplica
 {
+    public required string? IPAddress { get; init; }
+
     public required VagrantReplicaState State { get; init; }
 }

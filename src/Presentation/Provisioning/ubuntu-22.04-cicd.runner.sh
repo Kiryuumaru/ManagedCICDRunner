@@ -38,7 +38,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
 rm -rf /var/lib/apt/lists/*
 
 pip install jinja2
-    
+
 # Install git and GH
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
@@ -68,7 +68,7 @@ echo "Types: deb\nURIs: https://packages.microsoft.com/repos/azure-cli/\nSuites:
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(lsb_release -cs)
 rm -rf /var/lib/apt/lists/*
-    
+
 # Install .NET
 DOTNET_VERSION=8.0.300
 curl -fSL --output /tmp/dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_VERSION/dotnet-sdk-$DOTNET_VERSION-linux-x64.tar.gz
@@ -88,7 +88,7 @@ rm -rf $MINICONDA3_DIR/miniconda.sh
 echo ". $MINICONDA3_DIR/etc/profile.d/conda.sh" | tee -a /etc/profile.d/conda.sh /root/.bashrc
 echo 'export PATH=/usr/local/miniconda3/bin:$PATH' | tee -a /etc/profile.d/conda.sh /root/.bashrc
 /usr/local/miniconda3/bin/conda init --system
-    
+
 # Install NVM and node
 NVM_VERSION=0.40.0
 export NVM_DIR="/usr/local/nvm"
