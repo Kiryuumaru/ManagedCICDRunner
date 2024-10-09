@@ -1,4 +1,5 @@
-﻿using Domain.Vagrant.Enums;
+﻿using Domain.Runner.Enums;
+using Domain.Vagrant.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,6 +12,8 @@ namespace Domain.Vagrant.Models;
 public class VagrantReplica
 {
     public required string BuildId { get; init; }
+
+    public required RunnerOSType RunnerOS { get; init; }
 
     public required string Id { get; init; }
 

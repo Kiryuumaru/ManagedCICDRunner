@@ -518,6 +518,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                     vagrantReplica = new()
                     {
                         BuildId = buildId,
+                        RunnerOS = vagrantBuild.RunnerOS,
                         Id = replicaId,
                         Rev = rev,
                         Cpus = cpus,
@@ -549,6 +550,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
                 vagrantReplica = new()
                 {
                     BuildId = buildId,
+                    RunnerOS = vagrantBuild.RunnerOS,
                     Id = replicaId,
                     Rev = rev,
                     Cpus = cpus,
@@ -576,6 +578,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         return new()
         {
             BuildId = vagrantReplica.BuildId,
+            RunnerOS = vagrantReplica.RunnerOS,
             Id = vagrantReplica.Id,
             Rev = vagrantReplica.Rev,
             Cpus = vagrantReplica.Cpus,
@@ -624,7 +627,19 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
             });
         }
 
-        vagrantReplica = await GetReplica(replicaId, cancellationToken);
+        while (true)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            vagrantReplica = await GetReplica(replicaId, cancellationToken);
+            if (vagrantReplica != null && vagrantReplica.State == VagrantReplicaState.Running)
+            {
+                break;
+            }
+            await Task.Delay(2000, cancellationToken);
+        }
 
         if (vagrantReplica == null)
         {
@@ -781,6 +796,7 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         return new()
         {
             BuildId = vagrantReplica.BuildId,
+            RunnerOS = vagrantReplica.RunnerOS,
             Id = vagrantReplica.Id,
             Rev = vagrantReplica.Rev,
             Cpus = vagrantReplica.Cpus,
