@@ -853,6 +853,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 """;
             cacheServerBuild = await vagrantService.Build(RunnerOSType.Linux, "generic/ubuntu2204", cacheServerBuildId, "base", null, () => Task.FromResult(provisionCacheServerScriptFile), stoppingToken);
         }
+        bool ipWasUpdated = false;
         var cacheServerReplica = await vagrantService.GetReplica(cacheServerReplicaId, stoppingToken);
         if (cacheServerReplica == null ||
             cacheServerReplica.State == VagrantReplicaState.NotCreated)
@@ -860,14 +861,15 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
             _logger.LogInformation("Creating cache server OS replica...");
             string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
             cacheServerReplica = await vagrantService.CreateReplica(cacheServerBuildId, cacheServerReplicaId, baseRev, 2, 4, 1000, [], stoppingToken);
+            ipWasUpdated = true;
         }
         if (cacheServerReplica.State == VagrantReplicaState.Off)
         {
             _logger.LogInformation("Running cache server OS replica...");
             string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
             cacheServerReplica = await vagrantService.ResumeReplica(cacheServerReplicaId, stoppingToken);
+            ipWasUpdated = true;
         }
-        bool ipWasUpdated = false;
         if (string.IsNullOrEmpty(cacheServerIPAddress) || cacheServerReplica.IPAddress != cacheServerIPAddress)
         {
             if (!IPAddress.TryParse(cacheServerReplica.IPAddress, out _))
@@ -875,7 +877,6 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                 throw new Exception("Cache server IP address was not resolved");
             }
             cacheServerIPAddress = cacheServerReplica.IPAddress;
-            await UpdateRunnerHosts(vagrantService, [cacheServerReplica], stoppingToken);
             ipWasUpdated = true;
         }
         try
@@ -901,6 +902,10 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
         if (ipWasUpdated)
         {
+            if (!vagrantReplicas.Any(i => i.Id == cacheServerReplicaId))
+            {
+                vagrantReplicas.Add(cacheServerReplica);
+            }
             await UpdateRunnerHosts(vagrantService, vagrantReplicas, stoppingToken);
         }
     }
