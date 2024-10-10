@@ -635,6 +635,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             RUNNER_SHA256='{{GithubRunnerLinuxSHA256}}'
                             echo "$RUNNER_SHA256 /tmp/actions-runner-linux-x64.tar.gz" | sha256sum -c -
                             tar -xzf /tmp/actions-runner-linux-x64.tar.gz -C /r
+                            sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x43\x00\x41\x00\x43\x00\x48\x00\x45\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' ./bin/Runner.Worker.dll
                             ./bin/installdependencies.sh
                             """;
                     }
@@ -652,6 +653,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                               exit 1;
                             };
                             Expand-Archive "${env:TEMP}\\actions-runner-win-x64.zip" -DestinationPath c:\\r -Force;
+                            [byte[]] -split (((Get-Content -Path ./bin/Runner.Worker.dll -Encoding Byte) | ForEach-Object ToString X2) -join '' -Replace '41004300540049004F004E0053005F00430041004300480045005F00550052004C00','41004300540049004F004E0053005F00430041004300480045005F004F0052004C00' -Replace '..', '0x$& ') | Set-Content -Path ./bin/Runner.Worker.dll -Encoding Byte
                             """;
                     }
                     else
@@ -685,6 +687,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                         {
                             inputScript = $"""
                                 export RUNNER_ALLOW_RUNASROOT=1
+                                export ACTIONS_CACHE_URL="http://cache-server:3000/{runnerControllerId}/"
                                 cd "/r"
                                 sudo -E ./config.sh {inputArgs}
                                 sudo -E ./run.sh
@@ -696,6 +699,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                             inputScript = $"""
                                 $ErrorActionPreference="Stop"; $verbosePreference="Continue"; $ProgressPreference = "SilentlyContinue"
                                 $env:RUNNER_ALLOW_RUNASROOT=1
+                                $env:ACTIONS_CACHE_URL="http://cache-server:3000/{runnerControllerId}/"
                                 cd "C:\r"
                                 ./config.cmd {inputArgs}
                                 ./run.cmd
