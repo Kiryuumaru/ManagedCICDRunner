@@ -127,7 +127,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
 
         var cacheServerReplicaId = $"{RunnerIdentifier}-{runnerControllerId}-cache_server";
         var cacheServerBuildId = $"{cacheServerReplicaId}-base";
-        await CheckCacheServer(vagrantService, runnerControllerId, vagrantReplicas.Values.Where(i => i != null).Select(i => i!).ToList(), stoppingToken);
+        await CheckCacheServer(vagrantService, runnerControllerId, stoppingToken);
 
         _logger.LogDebug("Fetching runner token entities from service...");
         var runnerTokenEntityMap = (await runnerTokenService.GetAll(stoppingToken)).GetValueOrThrow();
@@ -814,7 +814,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         _logger.LogDebug("Runner routine end");
     }
 
-    private async Task CheckCacheServer(VagrantService vagrantService, string runnerControllerId, List<VagrantReplicaRuntime> vagrantReplicas, CancellationToken stoppingToken)
+    private async Task CheckCacheServer(VagrantService vagrantService, string runnerControllerId, CancellationToken stoppingToken)
     {
         _logger.LogDebug("Checking cache server...");
         var cacheServerReplicaId = $"{RunnerIdentifier}-{runnerControllerId}-cache_server";
@@ -902,10 +902,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         }
         if (ipWasUpdated)
         {
-            if (!vagrantReplicas.Any(i => i.Id == cacheServerReplicaId))
-            {
-                vagrantReplicas.Add(cacheServerReplica);
-            }
+            _logger.LogInformation("Updating existing runners to new cache-server hostname...");
+            var vagrantReplicas = (await vagrantService.GetReplicas(stoppingToken)).Values
+                .Where(i => i != null).Select(i => i!).ToList();
             await UpdateRunnerHosts(vagrantService, vagrantReplicas, stoppingToken);
         }
     }

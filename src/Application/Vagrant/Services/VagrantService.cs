@@ -610,12 +610,26 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
         AbsolutePath vagrantfilePath = replicaPath / "Vagrantfile";
         AbsolutePath replicaFilePath = replicaPath / "replica.json";
 
-        if (vagrantReplica.State == VagrantReplicaState.Starting)
+        async Task waitToRun()
         {
-            while (!cancellationToken.IsCancellationRequested && await GetStateCore(replicaPath, vagrantReplica.VMName, cancellationToken) == VagrantReplicaState.Starting)
+            while (true)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                vagrantReplica = await GetReplica(replicaId, cancellationToken);
+                if (vagrantReplica != null && vagrantReplica.State == VagrantReplicaState.Running)
+                {
+                    break;
+                }
                 await Task.Delay(2000, cancellationToken);
             }
+        }
+
+        if (vagrantReplica.State == VagrantReplicaState.Starting)
+        {
+            await waitToRun();
         }
         else
         {
@@ -625,25 +639,18 @@ public class VagrantService(ILogger<VagrantService> logger, IServiceProvider ser
 
                 await Cli.RunListenAndLog(_logger, ClientExecPath, ["up", "--no-provision", "--provider", "hyperv"], replicaPath, VagrantEnvVars, stoppingToken: cancellationToken);
             });
-        }
 
-        while (true)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            vagrantReplica = await GetReplica(replicaId, cancellationToken);
-            if (vagrantReplica != null && vagrantReplica.State == VagrantReplicaState.Running)
-            {
-                break;
-            }
-            await Task.Delay(2000, cancellationToken);
+            await waitToRun();
         }
 
         if (vagrantReplica == null)
         {
             throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica is empty on resume");
+        }
+
+        if (vagrantReplica.State != VagrantReplicaState.Running)
+        {
+            throw new Exception($"Error running vagrant replica \"{replicaId}\": Replica was not resumed");
         }
 
         return vagrantReplica;
