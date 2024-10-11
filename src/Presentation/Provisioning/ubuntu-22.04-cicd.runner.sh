@@ -70,7 +70,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(l
 rm -rf /var/lib/apt/lists/*
 
 # Install .NET
-DOTNET_VERSION=8.0.300
+DOTNET_VERSION=8.0.402
 curl -fSL --output /tmp/dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_VERSION/dotnet-sdk-$DOTNET_VERSION-linux-x64.tar.gz
 dotnet_sha512='6ba966801ad3869275469b0f7ee7af0b88b659d018a37b241962335bd95ef6e55cb6741ab77d96a93c68174d30d0c270b48b3cda21b493270b0d6038ee3fe79e'
 echo "$dotnet_sha512 /tmp/dotnet.tar.gz" | sha512sum -c -
