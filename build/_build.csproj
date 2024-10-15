@@ -14,7 +14,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Nuke.Common" Version="8.1.2" />
-		<PackageReference Include="NukeBuildHelpers" Version="6.3.4" />
+		<PackageReference Include="NukeBuildHelpers" Version="6.3.5" />
 	</ItemGroup>
 
 </Project>
