@@ -13,8 +13,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Nuke.Common" Version="8.1.1" />
-		<PackageReference Include="NukeBuildHelpers" Version="6.3.3" />
+		<PackageReference Include="Nuke.Common" Version="8.1.2" />
+		<PackageReference Include="NukeBuildHelpers" Version="6.3.4" />
 	</ItemGroup>
 
 </Project>
