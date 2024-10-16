@@ -12,14 +12,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="AbsolutePathHelpers" Version="0.1.34" />
-		<PackageReference Include="DisposableHelpers" Version="1.2.41" />
+		<PackageReference Include="AbsolutePathHelpers" Version="0.1.35" />
+		<PackageReference Include="DisposableHelpers" Version="1.2.42" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
-		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.24" />
+		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.25" />
 		<PackageReference Include="CliWrap" Version="3.6.6" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
-		<PackageReference Include="RestfulHelpers" Version="1.7.81" />
+		<PackageReference Include="RestfulHelpers" Version="1.7.84" />
 		<PackageReference Include="SshKeyGenerator" Version="1.1.51" />
 	</ItemGroup>
 
