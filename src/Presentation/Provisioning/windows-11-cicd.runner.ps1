@@ -32,7 +32,7 @@ if ((Get-FileHash "${env:TEMP}\\gh-cli.zip" -Algorithm sha256).Hash -ne $GH_SHA2
 Expand-Archive "${env:TEMP}\\gh-cli.zip" -DestinationPath "$GH_HOME" -Force;
 $env:PATH = $env:PATH + ";$GH_HOME\\bin\\;$GH_HOME\\bin";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-    
+
 # Install docker
 $DOCKER_VERSION = "27.1.1"
 $DOCKER_HOME = "C:\\Program Files\\Docker"
@@ -63,7 +63,9 @@ if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_S
     Write-Host 'AZCLI_SHA256 CHECKSUM VERIFICATION FAILED!';
     exit 1;
 };
-Start-Process msiexec.exe -NoNewWindow -Wait -ArgumentList '/i', "${env:TEMP}\\az-cli.msi", '/quiet', '/norestart'
+Start-Process msiexec.exe -Wait -ArgumentList '/I', "${env:TEMP}\\az-cli.msi", '/quiet', '/norestart'
+$env:PATH = $env:PATH + ";C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\;C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
 # Install Visual Studio
 Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${env:TEMP}\\vs_community.exe" -UseBasicParsing;
