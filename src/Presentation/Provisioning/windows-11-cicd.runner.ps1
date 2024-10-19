@@ -83,8 +83,11 @@ Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${en
     --add Microsoft.VisualStudio.Workload.Python `
     --add Microsoft.VisualStudio.Workload.Universal `
     --add Microsoft.VisualStudio.Workload.VisualStudioExtension `
+    --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
     --add Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64 `
     --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 `
+    --add Microsoft.VisualStudio.Component.VC.CLI.Support `
     --add Microsoft.VisualStudio.Component.VC.14.40.17.10.CLI.Support `
     | Out-Default
 
