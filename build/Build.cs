@@ -33,55 +33,6 @@ class Build : BaseNukeBuildHelpers
     private static readonly string[] osMatrix = ["windows"];
     private static readonly string[] archMatrix = ["x64", "arm64"];
 
-    string GetVersion(IRunContext context)
-    {
-        string version = "0.0.0";
-        if (context.TryGetVersionedContext(out var versionedContext))
-        {
-            version = versionedContext.AppVersion.Version.ToString();
-        }
-        return version;
-    }
-
-    AbsolutePath GetOutAsset(string os, string arch)
-    {
-        string name = $"ManagedCICDRunner_{os.ToLowerInvariant()}_{arch.ToLowerInvariant()}";
-        if (os == "linux")
-        {
-            return OutputDirectory / (name + ".tar.gz");
-        }
-        else if (os == "windows")
-        {
-            return OutputDirectory / (name + ".zip");
-        }
-        else
-        {
-            throw new NotSupportedException();
-        }
-    }
-
-    AbsolutePath[] GetAssets(string os, string arch)
-    {
-        List<AbsolutePath> assets = [];
-
-        assets.Add(GetOutAsset(os, arch));
-
-        if (os == "linux")
-        {
-        }
-        else if (os == "windows")
-        {
-            assets.Add(OutputDirectory / $"installer_{os}_{arch}.ps1");
-            assets.Add(OutputDirectory / $"uninstaller_{os}_{arch}.ps1");
-        }
-        else
-        {
-            throw new NotSupportedException();
-        }
-
-        return [.. assets];
-    }
-
     BuildEntry BuildManagedCICDRunnerBinaries => _ => _
         .AppId("managed-cicd-runner")
         .Matrix(osMatrix, (definitionOs, os) =>
@@ -172,4 +123,53 @@ class Build : BaseNukeBuildHelpers
             }
             return [.. paths];
         });
+
+    string GetVersion(IRunContext context)
+    {
+        string version = "0.0.0";
+        if (context.TryGetVersionedContext(out var versionedContext))
+        {
+            version = versionedContext.AppVersion.Version.ToString();
+        }
+        return version;
+    }
+
+    AbsolutePath GetOutAsset(string os, string arch)
+    {
+        string name = $"ManagedCICDRunner_{os.ToLowerInvariant()}_{arch.ToLowerInvariant()}";
+        if (os == "linux")
+        {
+            return OutputDirectory / (name + ".tar.gz");
+        }
+        else if (os == "windows")
+        {
+            return OutputDirectory / (name + ".zip");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    AbsolutePath[] GetAssets(string os, string arch)
+    {
+        List<AbsolutePath> assets = [];
+
+        assets.Add(GetOutAsset(os, arch));
+
+        if (os == "linux")
+        {
+        }
+        else if (os == "windows")
+        {
+            assets.Add(OutputDirectory / $"installer_{os}_{arch}.ps1");
+            assets.Add(OutputDirectory / $"uninstaller_{os}_{arch}.ps1");
+        }
+        else
+        {
+            throw new NotSupportedException();
+        }
+
+        return [.. assets];
+    }
 }
