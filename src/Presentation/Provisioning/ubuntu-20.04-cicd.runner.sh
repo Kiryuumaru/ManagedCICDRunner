@@ -7,7 +7,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     apt-transport-https \
     sudo \
     ca-certificates \
-    libssl3 \
     gnupg \
     lsb-release \
     zip \
@@ -38,8 +37,12 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     g++
     
 # Install OS version specific
+echo "deb http://security.ubuntu.com/ubuntu jammy-security main" | tee /etc/apt/sources.list.d/jammy-security.list
+apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libssl1.1
+    libssl1.1 \
+    libssl3
+rm /etc/apt/sources.list.d/jammy-security.list
 
 pip install jinja2
 
