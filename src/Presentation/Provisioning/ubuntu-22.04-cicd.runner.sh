@@ -60,6 +60,16 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docke
 apt-get update
 apt-get install -y docker-ce=$DOCKER_VERSION-1~$(lsb_release -is).$(lsb_release -rs)~$(lsb_release -cs)
 
+# Install Helm
+HELM_VERSION=3.16.2
+curl -fSL --output /tmp/helm.tar.gz https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz
+helm_sha512='0513b6cf7b311fee26a3be1aa7e4863cad6ff00bf61a15aee2c7cdb39ff4329ef9edadcbac3f2103d117c26bb9fd1714e51e04071af7e4f605141438bbab4671'
+echo "$helm_sha512 /tmp/helm.tar.gz" | sha512sum -c -
+mkdir -p /usr/share/helm
+tar -zxf /tmp/helm.tar.gz -C /usr/share/helm
+rm /tmp/helm.tar.gz
+ln -s /usr/share/helm/linux-amd64/helm /usr/bin/helm
+
 # Install AZ CLI
 AZCLI_VERSION=2.51.0
 mkdir -p /etc/apt/keyrings

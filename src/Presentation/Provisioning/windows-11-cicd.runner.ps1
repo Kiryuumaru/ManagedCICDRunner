@@ -55,6 +55,19 @@ $DOCKER_DAEMON_SETTINGS | ConvertTo-Json | Out-File -FilePath (Join-Path $DOCKER
 $env:PATH = $env:PATH + ";$DOCKER_HOME\\;$DOCKER_HOME";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
+# Install helm
+$HELM_VERSION = "3.16.2"
+$HELM_HOME = "C:\\Program Files\\Helm"
+Invoke-WebRequest "https://get.helm.sh/helm-v${HELM_VERSION}-windows-amd64.zip" -OutFile "${env:TEMP}\\helm.zip" -UseBasicParsing;
+$HELM_SHA256 = '57821DD47D5728912E14000EE62262680E9039E8D05E18342CC010D5AC7908D7';
+if ((Get-FileHash "${env:TEMP}\\helm.zip" -Algorithm sha256).Hash -ne $HELM_SHA256) {
+    Write-Host 'HELM_SHA256 CHECKSUM VERIFICATION FAILED!';
+    exit 1;
+};
+Expand-Archive "${env:TEMP}\\helm.zip" -DestinationPath "$HELM_HOME" -Force;
+$env:PATH = $env:PATH + ";$HELM_HOME\\windows-amd64\\;$HELM_HOME\\windows-amd64";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
+
 # Install az-cli
 $AZCLI_VERSION = 2.51.0
 Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
