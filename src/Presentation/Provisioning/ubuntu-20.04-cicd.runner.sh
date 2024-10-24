@@ -26,7 +26,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     zlib1g \
     ninja-build \
     build-essential \
-    pip \
+    python3-pip \
     nasm \
     gperf \
     bison \
