@@ -24,7 +24,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libgssapi-krb5-2 \
     libstdc++6 \
     zlib1g \
-    cmake \
     ninja-build \
     build-essential \
     pip \
@@ -41,6 +40,12 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libssl3
 
 pip install jinja2
+
+# Install Cmake
+curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main" | tee /etc/apt/sources.list.d/kitware.list > /dev/null
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y cmake
 
 # Install git and GH
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null
