@@ -1,5 +1,7 @@
 # Github CICD runner provision script fo ubuntu 22.04
 
+echo "deb http://security.ubuntu.com/ubuntu jammy-security main" | sudo tee /etc/apt/sources.list.d/jammy-security.list
+
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
     apt-transport-https \
