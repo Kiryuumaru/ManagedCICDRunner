@@ -1,6 +1,6 @@
 # Github CICD runner provision script fo ubuntu 20.04
 
-echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee /etc/apt/sources.list.d/focal-security.list
+echo "deb http://security.ubuntu.com/ubuntu focal-security main" | tee /etc/apt/sources.list.d/focal-security.list
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
