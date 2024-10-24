@@ -28,6 +28,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <None Update="Provisioning\ubuntu-20.04-cicd.runner.sh">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
 	  <None Update="Provisioning\ubuntu-22.04-cicd.runner.sh">
 	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	  </None>

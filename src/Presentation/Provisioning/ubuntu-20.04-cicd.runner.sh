@@ -1,4 +1,4 @@
-# Github CICD runner provision script fo ubuntu 22.04
+# Github CICD runner provision script fo ubuntu 20.04
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -38,7 +38,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     
 # Install OS version specific
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libssl3
+    libssl1.1
 
 pip install jinja2
 
