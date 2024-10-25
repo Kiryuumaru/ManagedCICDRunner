@@ -36,6 +36,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libssl1.1
 
 pip install jinja2
+sudo pip install jinja2
 
 # Install git and GH
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null

@@ -41,6 +41,7 @@ dpkg -i /tmp/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb
 rm -rf /tmp/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb
 
 pip install jinja2
+sudo pip install jinja2
 
 # Install git and GH
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null
