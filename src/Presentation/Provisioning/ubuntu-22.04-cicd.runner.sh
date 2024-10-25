@@ -32,6 +32,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     autoconf \
     gcc \
     g++ \
+    ninja-build \
     libssl3
 
 pip install jinja2
@@ -65,16 +66,6 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y cmake
 rm -rf /etc/apt/sources.list.d/kitware.list
 rm -rf /var/lib/apt/lists/*
-
-# Install Ninja-build
-NINJA_VERSION=1.12.1
-curl -fSL --output /tmp/ninja-linux.zip https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip
-ninja_sha512='9c2ad534e7e72e67c608de7784cfbae601095bfca96713731a3f1eca268d66a6302f40c138a4ad97f7e8c902cd3fb05994a175e46fe922295dcc2d1334bf9014'
-echo "$ninja_sha512 /tmp/ninja-linux.zip" | sha512sum -c -
-mkdir -p /usr/share/ninja-build
-unzip -o /tmp/ninja-linux.zip -d /usr/share/ninja-build
-rm /tmp/ninja-linux.zip
-ln -s /usr/share/ninja-build/ninja /usr/bin/ninja
 
 # Install Helm
 HELM_VERSION=3.16.2
