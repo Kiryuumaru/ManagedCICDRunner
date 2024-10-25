@@ -40,6 +40,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libssl1.1 \
     libssl3
 rm -rf /etc/apt/sources.list.d/jammy-security.list
+rm -rf /var/lib/apt/lists/*
 
 pip install jinja2
 
@@ -54,6 +55,7 @@ git config --global pack.deltaCacheSize 2047m
 git config --global pack.packSizeLimit 2047m
 git config --global pack.windowMemory 2047m
 rm -rf /etc/apt/sources.list.d/github-cli.list
+rm -rf /var/lib/apt/lists/*
 
 # Install Docker
 DOCKER_VERSION=5:27.1.1
@@ -62,6 +64,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docke
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce=$DOCKER_VERSION-1~$(lsb_release -is).$(lsb_release -rs)~$(lsb_release -cs)
 rm -rf /etc/apt/sources.list.d/docker.list
+rm -rf /var/lib/apt/lists/*
 
 # Install Cmake
 curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
@@ -69,6 +72,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/kitwa
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y cmake
 rm -rf /etc/apt/sources.list.d/kitware.list
+rm -rf /var/lib/apt/lists/*
 
 # Install Ninja-build
 NINJA_VERSION=1.12.1
@@ -99,6 +103,7 @@ echo "Types: deb\nURIs: https://packages.microsoft.com/repos/azure-cli/\nSuites:
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(lsb_release -cs)
 rm -rf /etc/apt/sources.list.d/azure-cli.sources
+rm -rf /var/lib/apt/lists/*
 
 # Install .NET
 DOTNET_VERSION=8.0.403
