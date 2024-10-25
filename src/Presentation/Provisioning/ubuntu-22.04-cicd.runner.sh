@@ -34,6 +34,11 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     g++ \
     ninja-build \
     libssl3
+    
+# Install libssl1.1
+curl -fSL --output /tmp/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb
+dpkg -i /tmp/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb
+rm -rf /tmp/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb
 
 pip install jinja2
 
