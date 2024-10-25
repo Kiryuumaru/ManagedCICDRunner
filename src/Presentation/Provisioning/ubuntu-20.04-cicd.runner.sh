@@ -1,7 +1,5 @@
 # Github CICD runner provision script fo ubuntu 20.04
 
-echo "deb http://security.ubuntu.com/ubuntu focal-security main" | tee /etc/apt/sources.list.d/focal-security.list
-
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
     apt-transport-https \
@@ -25,7 +23,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libgssapi-krb5-2 \
     libstdc++6 \
     zlib1g \
-    ninja-build \
     build-essential \
     python3-pip \
     nasm \
@@ -42,7 +39,7 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libssl1.1 \
     libssl3
-rm /etc/apt/sources.list.d/jammy-security.list
+rm -rf /etc/apt/sources.list.d/jammy-security.list
 
 pip install jinja2
 
@@ -56,6 +53,7 @@ git config --global core.packedGitWindowSize 512m
 git config --global pack.deltaCacheSize 2047m
 git config --global pack.packSizeLimit 2047m
 git config --global pack.windowMemory 2047m
+rm -rf /etc/apt/sources.list.d/github-cli.list
 
 # Install Docker
 DOCKER_VERSION=5:27.1.1
@@ -63,12 +61,24 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce=$DOCKER_VERSION-1~$(lsb_release -is).$(lsb_release -rs)~$(lsb_release -cs)
+rm -rf /etc/apt/sources.list.d/docker.list
 
 # Install Cmake
 curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg > /dev/null
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main" | tee /etc/apt/sources.list.d/kitware.list > /dev/null
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y cmake
+rm -rf /etc/apt/sources.list.d/kitware.list
+
+# Install Ninja-build
+NINJA_VERSION=1.12.1
+curl -fSL --output /tmp/ninja-linux.zip https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip
+ninja_sha512='9c2ad534e7e72e67c608de7784cfbae601095bfca96713731a3f1eca268d66a6302f40c138a4ad97f7e8c902cd3fb05994a175e46fe922295dcc2d1334bf9014'
+echo "$ninja_sha512 /tmp/ninja-linux.zip" | sha512sum -c -
+mkdir -p /usr/share/ninja-build
+unzip -o /tmp/ninja-linux.zip -d /usr/share/ninja-build
+rm /tmp/ninja-linux.zip
+ln -s /usr/share/ninja-build/ninja /usr/bin/ninja
 
 # Install Helm
 HELM_VERSION=3.16.2
@@ -88,6 +98,7 @@ chmod go+r /etc/apt/keyrings/microsoft.gpg
 echo "Types: deb\nURIs: https://packages.microsoft.com/repos/azure-cli/\nSuites: $(lsb_release -cs)\nComponents: main\nArchitectures: $(dpkg --print-architecture)\nSigned-by: /etc/apt/keyrings/microsoft.gpg" | tee /etc/apt/sources.list.d/azure-cli.sources
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(lsb_release -cs)
+rm -rf /etc/apt/sources.list.d/azure-cli.sources
 
 # Install .NET
 DOTNET_VERSION=8.0.403

@@ -103,6 +103,19 @@ Invoke-WebRequest "https://aka.ms/vs/17/release/vs_community.exe" -OutFile "${en
     --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 `
     --add Microsoft.VisualStudio.Component.VC.14.40.17.10.CLI.Support `
     | Out-Default
+    
+# Install Ninja-build
+$NINJA_VERSION = "1.12.1"
+$NINJA_HOME = "C:\\Program Files\\Ninja-build"
+Invoke-WebRequest "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-win.zip" -OutFile "${env:TEMP}\\ninja-win.zip" -UseBasicParsing;
+$NINJA_SHA256 = 'f550fec705b6d6ff58f2db3c374c2277a37691678d6aba463adcbb129108467a';
+if ((Get-FileHash "${env:TEMP}\\ninja-win.zip" -Algorithm sha256).Hash -ne $NINJA_SHA256) {
+    Write-Host 'NINJA_SHA256 CHECKSUM VERIFICATION FAILED!';
+    exit 1;
+};
+Expand-Archive "${env:TEMP}\\ninja-win.zip" -DestinationPath "$NINJA_HOME" -Force;
+$env:PATH = $env:PATH + ";$NINJA_HOME\\;$NINJA_HOME";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
 # Install 7zip
 $_7ZIP_VERSION = "2408"
