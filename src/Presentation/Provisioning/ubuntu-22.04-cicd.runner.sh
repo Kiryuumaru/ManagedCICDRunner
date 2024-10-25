@@ -31,16 +31,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libtool \
     autoconf \
     gcc \
-    g++
-    
-# Install OS version specific
-echo "deb http://security.ubuntu.com/ubuntu focal-security main" | tee /etc/apt/sources.list.d/focal-security.list
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libssl1.1 \
+    g++ \
     libssl3
-rm -rf /etc/apt/sources.list.d/focal-security.list
-rm -rf /var/lib/apt/lists/*
 
 pip install jinja2
 

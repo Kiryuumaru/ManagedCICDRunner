@@ -31,16 +31,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libtool \
     autoconf \
     gcc \
-    g++
-    
-# Install OS version specific
-echo "deb http://security.ubuntu.com/ubuntu jammy-security main" | tee /etc/apt/sources.list.d/jammy-security.list
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libssl1.1 \
-    libssl3
-rm -rf /etc/apt/sources.list.d/jammy-security.list
-rm -rf /var/lib/apt/lists/*
+    g++ \
+    libssl1.1
 
 pip install jinja2
 
