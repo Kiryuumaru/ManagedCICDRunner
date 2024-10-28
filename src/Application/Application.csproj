@@ -16,7 +16,7 @@
 		<PackageReference Include="DisposableHelpers" Version="1.2.47" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
-		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.29" />
+		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.30" />
 		<PackageReference Include="CliWrap" Version="3.6.7" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
 		<PackageReference Include="RestfulHelpers" Version="1.7.92" />
