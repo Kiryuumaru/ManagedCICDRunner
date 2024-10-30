@@ -864,7 +864,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
         {
             _logger.LogInformation("Creating cache server OS replica...");
             string baseRev = $"{cacheServerBuild.VagrantFileHash}-base_hash";
-            cacheServerReplica = await vagrantService.CreateReplica(cacheServerBuildId, cacheServerReplicaId, baseRev, 2, 4, 1000, [], stoppingToken);
+            cacheServerReplica = await vagrantService.CreateReplica(cacheServerBuildId, cacheServerReplicaId, baseRev, 2, 4, 2500, [], stoppingToken);
             ipWasUpdated = true;
         }
         if (cacheServerReplica.State == VagrantReplicaState.Off)
