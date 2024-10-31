@@ -19,7 +19,7 @@
 		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.33" />
 		<PackageReference Include="CliWrap" Version="3.6.7" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
-		<PackageReference Include="RestfulHelpers" Version="1.7.97" />
+		<PackageReference Include="RestfulHelpers" Version="1.7.99" />
 		<PackageReference Include="SshKeyGenerator" Version="1.1.51" />
 	</ItemGroup>
 
