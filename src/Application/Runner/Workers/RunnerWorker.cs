@@ -900,7 +900,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     $"-e \"API_BASE_URL=http://cache-server:3000\" " +
                     $"-v \"cache-server-data:/app/.data\" " +
                     $"-p \"3000:3000\" " +
-                    $"ghcr.io/falcondev-oss/github-actions-cache-server:latest";
+                    $"ghcr.io/falcondev-oss/github-actions-cache-server:3.1.0";
             await vagrantService.Execute(cacheServerReplicaId, () => Task.FromResult(cacheServerInputScript), stoppingToken);
             ipWasUpdated = true;
         }
