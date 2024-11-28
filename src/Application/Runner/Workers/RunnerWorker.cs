@@ -898,6 +898,7 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
                     $"--cpus=2 --memory=4g " +
                     $"-e \"URL_ACCESS_TOKEN={runnerControllerId}\" " +
                     $"-e \"API_BASE_URL=http://cache-server:3000\" " +
+                    $"-e \"CLEANUP_OLDER_THAN_DAYS=30\" " +
                     $"-v \"cache-server-data:/app/.data\" " +
                     $"-p \"3000:3000\" " +
                     $"ghcr.io/falcondev-oss/github-actions-cache-server:3.1.0";
