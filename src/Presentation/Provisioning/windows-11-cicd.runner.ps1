@@ -33,6 +33,21 @@ Expand-Archive "${env:TEMP}\\gh-cli.zip" -DestinationPath "$GH_HOME" -Force;
 $env:PATH = $env:PATH + ";$GH_HOME\\bin\\;$GH_HOME\\bin";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
+# Install Miniconda
+$MINICONDA_RELEASE = "py312_24.5.0-0"
+$MINICONDA_DIR = "C:\\Program Files\\miniconda3"
+Invoke-WebRequest "https://repo.anaconda.com/miniconda/Miniconda3-${MINICONDA_RELEASE}-Windows-x86_64.exe" -OutFile "${env:TEMP}\\miniconda.exe" -UseBasicParsing;
+$MINICONDA_SHA256 = 'b1ce11a339c8246010e898065f6fa6feb1940a55fefd550b57a8039c7d4b6200';
+if ((Get-FileHash "${env:TEMP}\\miniconda.exe" -Algorithm sha256).Hash -ne $MINICONDA_SHA256) {
+    Write-Host 'MINICONDA_SHA256 CHECKSUM VERIFICATION FAILED!';
+    exit 1;
+};
+mkdir -p "$MINICONDA_DIR"
+Start-Process "$env:TEMP\\miniconda.exe" -Wait -ArgumentList @('/S', '/InstallationType=AllUsers', '/AddToPath=1', "/D=$MINICONDA_DIR")
+$env:PATH = $env:PATH + ";$MINICONDA_DIR\\condabin\\;$MINICONDA_DIR\\condabin";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
+& "$MINICONDA_DIR\\condabin\\conda.bat" init --system
+
 # Install docker
 $DOCKER_VERSION = "27.1.1"
 $DOCKER_HOME = "C:\\Program Files\\Docker"
@@ -68,8 +83,8 @@ Expand-Archive "${env:TEMP}\\helm.zip" -DestinationPath "$HELM_HOME" -Force;
 $env:PATH = $env:PATH + ";$HELM_HOME\\windows-amd64\\;$HELM_HOME\\windows-amd64";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
-# Install az-cli
-$AZCLI_VERSION = 2.51.0
+# Install AZ cli
+$AZCLI_VERSION = "2.51.0"
 Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
 $AZCLI_SHA256 = 'ded0e2fbbae52016239c899e7334785726be0e48671c018ee918fca8f62c1ea5';
 if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_SHA256) {
@@ -78,6 +93,21 @@ if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_S
 };
 Start-Process msiexec.exe -Wait -ArgumentList '/I', "${env:TEMP}\\az-cli.msi", '/quiet', '/norestart'
 $env:PATH = $env:PATH + ";C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin\\;C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
+
+# Install GCloud CLI
+$GCLOUDCLI_VERSION = "504.0.1"
+$GCLOUDCLI_HOME = "C:\\Program Files\\gcloud"
+$env:CLOUDSDK_CORE_DISABLE_PROMPTS = 1
+Invoke-WebRequest "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUDCLI_VERSION}-windows-x86_64.zip" -OutFile "${env:TEMP}\\google-cloud-cli-windows-x86_64.zip" -UseBasicParsing;
+$GCLOUDCLI_SHA256 = '02665dc0b9c76c154029e921cecd493da8023de491439c99557cf36fd4b4d954';
+if ((Get-FileHash "${env:TEMP}\\google-cloud-cli-windows-x86_64.zip" -Algorithm sha256).Hash -ne $GCLOUDCLI_SHA256) {
+    Write-Host 'GCLOUDCLI_SHA256 CHECKSUM VERIFICATION FAILED!';
+    exit 1;
+};
+Expand-Archive "${env:TEMP}\\google-cloud-cli-windows-x86_64.zip" -DestinationPath "$GCLOUDCLI_HOME" -Force;
+& "$GCLOUDCLI_HOME\\google-cloud-sdk\\install.bat" -q
+$env:PATH = $env:PATH + ";$GCLOUDCLI_HOME\\google-cloud-sdk\\bin\\;$GCLOUDCLI_HOME\\google-cloud-sdk\\bin";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
 # Install Visual Studio
@@ -129,21 +159,6 @@ if ((Get-FileHash "${env:TEMP}\\7z-x64.exe" -Algorithm sha256).Hash -ne $_7ZIP_S
 Start-Process "$env:TEMP\\7z-x64.exe" -Wait -ArgumentList @('/S', "/D=`"$_7ZIP_DIR`"")
 $env:PATH = $env:PATH + ";$_7ZIP_DIR\\;$_7ZIP_DIR";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-
-# Install Miniconda
-$MINICONDA_RELEASE = "py312_24.5.0-0"
-$MINICONDA_DIR = "C:\\Program Files\\miniconda3"
-Invoke-WebRequest "https://repo.anaconda.com/miniconda/Miniconda3-${MINICONDA_RELEASE}-Windows-x86_64.exe" -OutFile "${env:TEMP}\\miniconda.exe" -UseBasicParsing;
-$MINICONDA_SHA256 = 'b1ce11a339c8246010e898065f6fa6feb1940a55fefd550b57a8039c7d4b6200';
-if ((Get-FileHash "${env:TEMP}\\miniconda.exe" -Algorithm sha256).Hash -ne $MINICONDA_SHA256) {
-    Write-Host 'MINICONDA_SHA256 CHECKSUM VERIFICATION FAILED!';
-    exit 1;
-};
-mkdir -p "$MINICONDA_DIR"
-Start-Process "$env:TEMP\\miniconda.exe" -Wait -ArgumentList @('/S', '/InstallationType=AllUsers', '/AddToPath=1', "/D=$MINICONDA_DIR")
-$env:PATH = $env:PATH + ";$MINICONDA_DIR\\condabin\\;$MINICONDA_DIR\\condabin";
-Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
-& "$MINICONDA_DIR\\condabin\\conda.bat" init --system
 
 # Install NVM and node
 $NVM_VERSION = "1.1.11"

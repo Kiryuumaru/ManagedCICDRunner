@@ -56,6 +56,16 @@ git config --global pack.windowMemory 2047m
 rm -rf /etc/apt/sources.list.d/github-cli.list
 rm -rf /var/lib/apt/lists/*
 
+# Install Miniconda
+export MINICONDA3_DIR="/usr/local/miniconda3"
+mkdir -p $MINICONDA3_DIR
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $MINICONDA3_DIR/miniconda.sh
+bash $MINICONDA3_DIR/miniconda.sh -b -u -p $MINICONDA3_DIR
+rm -rf $MINICONDA3_DIR/miniconda.sh
+echo ". $MINICONDA3_DIR/etc/profile.d/conda.sh" | tee -a /etc/profile.d/conda.sh /root/.bashrc
+echo 'export PATH=/usr/local/miniconda3/bin:$PATH' | tee -a /etc/profile.d/conda.sh /root/.bashrc
+/usr/local/miniconda3/bin/conda init --system
+
 # Install Docker
 DOCKER_VERSION=5:27.1.1
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
@@ -94,6 +104,16 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli=$AZCLI_VERSION-1~$(l
 rm -rf /etc/apt/sources.list.d/azure-cli.sources
 rm -rf /var/lib/apt/lists/*
 
+# Install GCloud CLI
+GCLOUDCLI_VERSION=504.0.1
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y google-cloud-cli=$GCLOUDCLI_VERSION-0
+rm -rf /etc/apt/sources.list.d/google-cloud-sdk.list
+rm -rf /var/lib/apt/lists/*
+
 # Install .NET
 DOTNET_VERSION=8.0.403
 curl -fSL --output /tmp/dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_VERSION/dotnet-sdk-$DOTNET_VERSION-linux-x64.tar.gz
@@ -103,16 +123,6 @@ mkdir -p /usr/share/dotnet
 tar -zxf /tmp/dotnet.tar.gz -C /usr/share/dotnet
 rm /tmp/dotnet.tar.gz
 ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
-
-# Install Miniconda
-export MINICONDA3_DIR="/usr/local/miniconda3"
-mkdir -p $MINICONDA3_DIR
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $MINICONDA3_DIR/miniconda.sh
-bash $MINICONDA3_DIR/miniconda.sh -b -u -p $MINICONDA3_DIR
-rm -rf $MINICONDA3_DIR/miniconda.sh
-echo ". $MINICONDA3_DIR/etc/profile.d/conda.sh" | tee -a /etc/profile.d/conda.sh /root/.bashrc
-echo 'export PATH=/usr/local/miniconda3/bin:$PATH' | tee -a /etc/profile.d/conda.sh /root/.bashrc
-/usr/local/miniconda3/bin/conda init --system
 
 # Install NVM and node
 NVM_VERSION=0.40.0
