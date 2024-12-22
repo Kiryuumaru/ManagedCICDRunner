@@ -86,7 +86,7 @@ Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manag
 # Install AZ cli
 $AZCLI_VERSION = "2.51.0"
 Invoke-WebRequest "https://azcliprod.blob.core.windows.net/msi/azure-cli-${AZCLI_VERSION}-x64.msi" -OutFile "${env:TEMP}\\az-cli.msi" -UseBasicParsing;
-$AZCLI_SHA256 = 'ded0e2fbbae52016239c899e7334785726be0e48671c018ee918fca8f62c1ea5';
+$AZCLI_SHA256 = '80ba0df4eb7007a9b18f46308f5d6a3f4b54f84aaa5d4f0727a0adcaae3dbd8c';
 if ((Get-FileHash "${env:TEMP}\\az-cli.msi" -Algorithm sha256).Hash -ne $AZCLI_SHA256) {
     Write-Host 'AZCLI_SHA256 CHECKSUM VERIFICATION FAILED!';
     exit 1;
