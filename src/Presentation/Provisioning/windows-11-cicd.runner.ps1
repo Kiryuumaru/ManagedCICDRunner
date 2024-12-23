@@ -33,6 +33,16 @@ Expand-Archive "${env:TEMP}\\gh-cli.zip" -DestinationPath "$GH_HOME" -Force;
 $env:PATH = $env:PATH + ";$GH_HOME\\bin\\;$GH_HOME\\bin";
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
+# Install Python
+$PYTHON_VERSION = "3.11.4"
+$PYTHON_HOME = "C:\Program Files\Python311"
+Invoke-WebRequest "https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe" -OutFile "${env:TEMP}\\python_installer.exe" -UseBasicParsing;
+Start-Process -FilePath "${env:TEMP}\\python_installer.exe" -ArgumentList "/quiet InstallAllUsers=1 InstallLauncherAllUsers=0 PrependPath=1 Include_test=0" -Wait
+$env:PATH = $env:PATH + ";$PYTHON_HOME;$PYTHON_HOME\\;$PYTHON_HOME\\Scripts;$PYTHON_HOME\\Scripts\\";
+Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
+Remove-Item $env:LOCALAPPDATA\Microsoft\WindowsApps\python.exe
+Remove-Item $env:LOCALAPPDATA\Microsoft\WindowsApps\python3.exe
+
 # Install Miniconda
 $MINICONDA_RELEASE = "py312_24.5.0-0"
 $MINICONDA_DIR = "C:\\Program Files\\miniconda3"
