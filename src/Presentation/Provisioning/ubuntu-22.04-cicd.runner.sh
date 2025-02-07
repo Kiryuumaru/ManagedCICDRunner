@@ -53,6 +53,7 @@ git config --global core.packedGitWindowSize 512m
 git config --global pack.deltaCacheSize 2047m
 git config --global pack.packSizeLimit 2047m
 git config --global pack.windowMemory 2047m
+git config --global http.schannelCheckRevoke false
 rm -rf /etc/apt/sources.list.d/github-cli.list
 rm -rf /var/lib/apt/lists/*
 

@@ -18,6 +18,7 @@ $env:PATH = $env:PATH + ";$GIT_HOME\\cmd\\;$GIT_HOME\\cmd";
 & "$GIT_HOME\\cmd\\git.exe" config --global pack.deltaCacheSize 2047m
 & "$GIT_HOME\\cmd\\git.exe" config --global pack.packSizeLimit 2047m
 & "$GIT_HOME\\cmd\\git.exe" config --global pack.windowMemory 2047m
+& "$GIT_HOME\\cmd\\git.exe" config --global http.schannelCheckRevoke false
 Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\\' -Name Path -Value $env:PATH
 
 # Install gh-cli
