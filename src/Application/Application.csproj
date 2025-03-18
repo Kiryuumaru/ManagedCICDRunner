@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
@@ -19,7 +19,7 @@
 		<PackageReference Include="ApplicationBuilderHelpers" Version="1.0.60" />
 		<PackageReference Include="CliWrap" Version="3.8.2" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
-		<PackageReference Include="RestfulHelpers" Version="1.8.51" />
+		<PackageReference Include="RestfulHelpers" Version="1.8.52" />
 		<PackageReference Include="SshKeyGenerator" Version="1.1.51" />
 	</ItemGroup>
 
