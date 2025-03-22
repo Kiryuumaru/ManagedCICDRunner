@@ -36,9 +36,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libssl3
     
 # Install libssl1.1
-curl -fSL --output /tmp/libssl1.1_1.1.0g-2ubuntu4_amd64.deb http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.0g-2ubuntu4_amd64.deb
-dpkg -i /tmp/libssl1.1_1.1.0g-2ubuntu4_amd64.deb
-rm -rf /tmp/libssl1.1_1.1.0g-2ubuntu4_amd64.deb
+curl -fSL --output /tmp/libssl1.1_1.1.1f-1ubuntu2_arm64.deb http://ports.ubuntu.com/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb
+dpkg -i /tmp/libssl1.1_1.1.1f-1ubuntu2_arm64.deb
+rm -rf /tmp/libssl1.1_1.1.1f-1ubuntu2_arm64.deb
 
 pip install jinja2
 sudo pip install jinja2
