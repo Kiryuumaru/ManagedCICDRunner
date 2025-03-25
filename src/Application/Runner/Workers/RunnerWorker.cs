@@ -46,9 +46,9 @@ internal class RunnerWorker(ILogger<RunnerWorker> logger, IServiceProvider servi
     private readonly ConcurrentDictionary<string, RunnerInstance> executingReplicaMap = [];
 
     private const string RunnerIdentifier = "managed_runner";
-    private const string GithubRunnerVersion = "2.321.0";
-    private const string GithubRunnerLinuxSHA256 = "ba46ba7ce3a4d7236b16fbe44419fb453bc08f866b24f04d549ec89f1722a29e";
-    private const string GithubRunnerWindowsSHA256 = "88d754da46f4053aec9007d172020c1b75ab2e2049c08aef759b643316580bbc";
+    private const string GithubRunnerVersion = "2.323.0";
+    private const string GithubRunnerLinuxSHA256 = "0dbc9bf5a58620fc52cb6cc0448abcca964a8d74b5f39773b7afcad9ab691e19";
+    private const string GithubRunnerWindowsSHA256 = "e8ca92e3b1b907cdcc0c94640f4c5b23f377743993a4a5c859cb74f3e6eb33ef";
 
     private string? cacheServerIPAddress = null;
 
